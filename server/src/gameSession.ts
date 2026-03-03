@@ -1,8 +1,6 @@
 import type { TypedServer, TypedSocket, Room } from "./types.js";
 import type { GameAction } from "@/shared/types/actions";
 import type { GameConfig } from "@/shared/types/config";
-import type { PlayerColor } from "@/shared/types/game";
-import { PLAYER_COLORS } from "@/shared/types/game";
 import { createGame, applyAction } from "@/server/engine/gameEngine";
 import { decideBotAction } from "@/server/bots/botController";
 import { filterStateForPlayer } from "./stateFilter.js";
@@ -28,23 +26,18 @@ export function handleStartGame(io: TypedServer, socket: TypedSocket) {
   }
 
   const playerNames = room.players.map((p) => p.name);
-  const usedColors: PlayerColor[] = [];
   const config: GameConfig = {
-    players: room.players.map((p, i) => {
-      // Assign colors in order, skipping used ones
-      const color = PLAYER_COLORS.find((c) => !usedColors.includes(c)) ?? PLAYER_COLORS[i];
-      usedColors.push(color);
-      return {
-        name: p.name,
-        color,
-        isBot: p.isBot,
-      };
-    }),
-    fairDice: false,
-    friendlyRobber: false,
-    gameMode: "classic",
-    vpToWin: 10,
-    turnTimer: 0,
+    players: room.players.map((p) => ({
+      name: p.name,
+      color: p.color,
+      isBot: p.isBot,
+      buildingStyle: p.buildingStyle,
+    })),
+    fairDice: room.lobbyConfig.fairDice,
+    friendlyRobber: room.lobbyConfig.friendlyRobber,
+    gameMode: room.lobbyConfig.gameMode,
+    vpToWin: room.lobbyConfig.vpToWin,
+    turnTimer: room.lobbyConfig.turnTimer,
     expansionBoard: room.players.length >= 5,
   };
 

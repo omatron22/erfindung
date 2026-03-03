@@ -1,8 +1,19 @@
 import crypto from "crypto";
 import type { TypedServer, TypedSocket, Room, PlayerSlot } from "./types.js";
-import type { LobbyPlayer } from "@/shared/types/messages";
-import { handleStartGame, handleGameAction } from "./gameSession.js";
+import type { LobbyPlayer, LobbyConfig } from "@/shared/types/messages";
+import type { BuildingStyle } from "@/shared/types/config";
+import { BUILDING_STYLES, TURN_TIMER_OPTIONS, VP_OPTIONS } from "@/shared/types/config";
+import { PLAYER_COLORS } from "@/shared/types/game";
+import { handleStartGame, handleGameAction, scheduleBotActions, broadcastState } from "./gameSession.js";
 import { filterStateForPlayer } from "./stateFilter.js";
+
+const DEFAULT_LOBBY_CONFIG: LobbyConfig = {
+  fairDice: false,
+  friendlyRobber: false,
+  gameMode: "classic",
+  vpToWin: 10,
+  turnTimer: 0,
+};
 
 const rooms = new Map<string, Room>();
 const socketToRoom = new Map<string, string>(); // socketId → roomCode
@@ -37,17 +48,33 @@ export function getPlayerSlot(room: Room, socketId: string): PlayerSlot | undefi
   return room.players.find((p) => p.socketId === socketId);
 }
 
+function getHostIndex(room: Room): number {
+  const idx = room.players.findIndex((p) => p.socketId === room.hostSocketId);
+  return idx >= 0 ? idx : 0;
+}
+
+function firstUnusedColor(room: Room): string {
+  const used = new Set(room.players.map((p) => p.color));
+  return PLAYER_COLORS.find((c) => !used.has(c)) ?? "red";
+}
+
 function toLobbyPlayers(room: Room): LobbyPlayer[] {
   return room.players.map((p) => ({
     index: p.index,
     name: p.name,
     isBot: p.isBot,
     isReady: p.isBot || p.socketId !== null,
+    color: p.color,
+    buildingStyle: p.buildingStyle,
   }));
 }
 
 function broadcastLobbyState(io: TypedServer, room: Room) {
-  io.to(room.code).emit("room:lobby-state", { players: toLobbyPlayers(room) });
+  io.to(room.code).emit("room:lobby-state", {
+    players: toLobbyPlayers(room),
+    config: room.lobbyConfig,
+    hostIndex: getHostIndex(room),
+  });
 }
 
 export function handleConnection(io: TypedServer, socket: TypedSocket) {
@@ -63,8 +90,24 @@ export function handleConnection(io: TypedServer, socket: TypedSocket) {
     handleAddBot(io, socket, difficulty);
   });
 
+  socket.on("room:remove-bot", ({ playerIndex }) => {
+    handleRemoveBot(io, socket, playerIndex);
+  });
+
   socket.on("room:start-game", () => {
     handleStartGame(io, socket);
+  });
+
+  socket.on("room:update-config", ({ config }) => {
+    handleUpdateConfig(io, socket, config);
+  });
+
+  socket.on("room:update-player", ({ color, buildingStyle }) => {
+    handleUpdatePlayer(io, socket, color, buildingStyle);
+  });
+
+  socket.on("room:leave-game", () => {
+    handleLeaveGame(io, socket);
   });
 
   socket.on("game:action", ({ action }) => {
@@ -102,10 +145,12 @@ function handleJoin(
           socketId: socket.id,
           reconnectToken: token,
           disconnectedAt: null,
+          color: PLAYER_COLORS[0],
         },
       ],
       gameState: null,
       gameConfig: null,
+      lobbyConfig: { ...DEFAULT_LOBBY_CONFIG },
       botTimers: [],
       turnTimer: null,
       turnDeadline: null,
@@ -169,6 +214,7 @@ function handleJoin(
     socketId: socket.id,
     reconnectToken: token,
     disconnectedAt: null,
+    color: firstUnusedColor(room),
   };
   room.players.push(slot);
   socketToRoom.set(socket.id, roomCode);
@@ -196,6 +242,7 @@ function handleAddBot(io: TypedServer, socket: TypedSocket, difficulty: string) 
     socketId: null,
     reconnectToken: null,
     disconnectedAt: null,
+    color: firstUnusedColor(room),
   });
   broadcastLobbyState(io, room);
 }
@@ -230,7 +277,18 @@ function handleDisconnect(io: TypedServer, socket: TypedSocket) {
         // In-game: replace with bot
         slot.isBot = true;
         slot.reconnectToken = null;
+
+        // Reassign host if needed
+        if (slot.socketId && room.hostSocketId === slot.socketId) {
+          const newHost = room.players.find((p) => !p.isBot && p.socketId);
+          if (newHost) room.hostSocketId = newHost.socketId!;
+        }
+
+        // Check if all humans are gone
+        if (checkAllHumansGone(io, room)) return;
+
         broadcastLobbyState(io, room);
+        scheduleBotActions(io, room);
       } else {
         // In lobby: remove entirely
         removePlayerBySlot(io, room, slot);
@@ -261,6 +319,111 @@ function removePlayerBySlot(io: TypedServer, room: Room, slot: PlayerSlot) {
   }
 
   broadcastLobbyState(io, room);
+}
+
+function handleRemoveBot(io: TypedServer, socket: TypedSocket, playerIndex: number) {
+  const room = getRoomForSocket(socket.id);
+  if (!room || room.hostSocketId !== socket.id) return;
+  if (room.gameState) return; // can't remove bots mid-game
+  const slot = room.players[playerIndex];
+  if (!slot || !slot.isBot) return;
+
+  room.players.splice(playerIndex, 1);
+  room.players.forEach((p, i) => (p.index = i));
+  broadcastLobbyState(io, room);
+}
+
+function handleUpdateConfig(io: TypedServer, socket: TypedSocket, config: Partial<LobbyConfig>) {
+  const room = getRoomForSocket(socket.id);
+  if (!room || room.hostSocketId !== socket.id) return;
+  if (room.gameState) return;
+
+  // Validate values
+  if (config.vpToWin !== undefined && !(VP_OPTIONS as readonly number[]).includes(config.vpToWin)) return;
+  if (config.turnTimer !== undefined && !(TURN_TIMER_OPTIONS as readonly number[]).includes(config.turnTimer)) return;
+  if (config.gameMode !== undefined && !["classic", "speed"].includes(config.gameMode)) return;
+
+  room.lobbyConfig = { ...room.lobbyConfig, ...config };
+  broadcastLobbyState(io, room);
+}
+
+function handleUpdatePlayer(
+  io: TypedServer,
+  socket: TypedSocket,
+  color?: string,
+  buildingStyle?: string,
+) {
+  const room = getRoomForSocket(socket.id);
+  if (!room) return;
+  if (room.gameState) return;
+
+  const slot = room.players.find((p) => p.socketId === socket.id);
+  if (!slot) return;
+
+  if (color !== undefined) {
+    if (!(PLAYER_COLORS as readonly string[]).includes(color)) return;
+    // Swap with whoever has this color
+    const other = room.players.find((p) => p !== slot && p.color === color);
+    if (other) {
+      other.color = slot.color;
+    }
+    slot.color = color;
+  }
+
+  if (buildingStyle !== undefined) {
+    if (!(BUILDING_STYLES as readonly string[]).includes(buildingStyle)) return;
+    slot.buildingStyle = buildingStyle as import("@/shared/types/config").BuildingStyle;
+  }
+
+  broadcastLobbyState(io, room);
+}
+
+function handleLeaveGame(io: TypedServer, socket: TypedSocket) {
+  const room = getRoomForSocket(socket.id);
+  if (!room) return;
+
+  const slot = room.players.find((p) => p.socketId === socket.id);
+  if (!slot) return;
+
+  // If not in-game, delegate to normal leave
+  if (!room.gameState) {
+    handleLeave(io, socket);
+    return;
+  }
+
+  // In-game: convert to bot
+  slot.isBot = true;
+  slot.socketId = null;
+  slot.reconnectToken = null;
+  socket.leave(room.code);
+  socketToRoom.delete(socket.id);
+
+  // Reassign host if needed
+  if (room.hostSocketId === socket.id) {
+    const newHost = room.players.find((p) => !p.isBot && p.socketId);
+    if (newHost) room.hostSocketId = newHost.socketId!;
+  }
+
+  // Check if all humans are gone
+  if (checkAllHumansGone(io, room)) return;
+
+  broadcastLobbyState(io, room);
+
+  // If it's now a bot's turn, schedule bot actions
+  scheduleBotActions(io, room);
+}
+
+function checkAllHumansGone(io: TypedServer, room: Room): boolean {
+  const anyHuman = room.players.some((p) => !p.isBot);
+  if (!anyHuman) {
+    // End session
+    room.botTimers.forEach(clearTimeout);
+    if (room.turnTimer) clearTimeout(room.turnTimer);
+    io.to(room.code).emit("room:session-ended", { reason: "All players have left" });
+    rooms.delete(room.code);
+    return true;
+  }
+  return false;
 }
 
 function handleChat(io: TypedServer, socket: TypedSocket, text: string) {

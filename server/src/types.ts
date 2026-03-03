@@ -1,7 +1,7 @@
 import type { Server, Socket } from "socket.io";
 import type { GameState } from "@/shared/types/game";
-import type { ClientMessages, ServerMessages } from "@/shared/types/messages";
-import type { GameConfig } from "@/shared/types/config";
+import type { ClientMessages, ServerMessages, LobbyConfig } from "@/shared/types/messages";
+import type { GameConfig, BuildingStyle } from "@/shared/types/config";
 
 export interface PlayerSlot {
   index: number;
@@ -10,6 +10,8 @@ export interface PlayerSlot {
   socketId: string | null; // null for bots or disconnected players
   reconnectToken: string | null;
   disconnectedAt: number | null; // timestamp when disconnected
+  color: string;
+  buildingStyle?: BuildingStyle;
 }
 
 export interface Room {
@@ -18,6 +20,7 @@ export interface Room {
   players: PlayerSlot[];
   gameState: GameState | null;
   gameConfig: GameConfig | null;
+  lobbyConfig: LobbyConfig;
   botTimers: NodeJS.Timeout[];
   turnTimer: NodeJS.Timeout | null;
   turnDeadline: number | null; // timestamp

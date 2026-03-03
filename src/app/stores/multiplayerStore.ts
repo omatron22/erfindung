@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ClientGameState, LobbyPlayer } from "@/shared/types/messages";
+import type { ClientGameState, LobbyPlayer, LobbyConfig } from "@/shared/types/messages";
 import type { GameEvent } from "@/shared/types/actions";
 
 interface MultiplayerStore {
@@ -11,6 +11,8 @@ interface MultiplayerStore {
 
   // Lobby state
   lobbyPlayers: LobbyPlayer[];
+  lobbyConfig: LobbyConfig | null;
+  hostIndex: number;
 
   // Game state (server-pushed)
   gameState: ClientGameState | null;
@@ -27,7 +29,7 @@ interface MultiplayerStore {
 
   // Actions
   setRoomJoined: (roomCode: string, playerIndex: number, reconnectToken: string) => void;
-  setLobbyPlayers: (players: LobbyPlayer[]) => void;
+  setLobbyState: (data: { players: LobbyPlayer[]; config: LobbyConfig; hostIndex: number }) => void;
   setGameState: (state: ClientGameState) => void;
   setEvents: (events: GameEvent[]) => void;
   setError: (error: string | null) => void;
@@ -42,6 +44,8 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
   reconnectToken: null,
   connected: false,
   lobbyPlayers: [],
+  lobbyConfig: null,
+  hostIndex: 0,
   gameState: null,
   lastEvents: [],
   error: null,
@@ -55,7 +59,8 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
     set({ roomCode, playerIndex, reconnectToken, error: null });
   },
 
-  setLobbyPlayers: (players) => set({ lobbyPlayers: players }),
+  setLobbyState: ({ players, config, hostIndex }) =>
+    set({ lobbyPlayers: players, lobbyConfig: config, hostIndex }),
 
   setGameState: (state) => set({ gameState: state, error: null }),
 
@@ -74,6 +79,8 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
       playerIndex: null,
       reconnectToken: null,
       lobbyPlayers: [],
+      lobbyConfig: null,
+      hostIndex: 0,
       gameState: null,
       lastEvents: [],
       error: null,

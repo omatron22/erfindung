@@ -1,5 +1,14 @@
 import type { GameAction, GameEvent } from "./actions";
 import type { GameState, PlayerState } from "./game";
+import type { GameMode, TurnTimer } from "./config";
+
+export interface LobbyConfig {
+  fairDice: boolean;
+  friendlyRobber: boolean;
+  gameMode: GameMode;
+  vpToWin: number;
+  turnTimer: TurnTimer;
+}
 
 // Client → Server messages
 export interface ClientMessages {
@@ -7,7 +16,11 @@ export interface ClientMessages {
   "room:join": { roomCode: string; playerName: string; reconnectToken?: string };
   "room:leave": {};
   "room:add-bot": { difficulty: "easy" | "medium" | "hard"; personality?: string };
+  "room:remove-bot": { playerIndex: number };
   "room:start-game": {};
+  "room:update-config": { config: Partial<LobbyConfig> };
+  "room:update-player": { color?: string; buildingStyle?: string };
+  "room:leave-game": {};
   "chat:message": { text: string };
 }
 
@@ -19,7 +32,8 @@ export interface ServerMessages {
   "room:joined": { roomCode: string; playerIndex: number; reconnectToken: string };
   "room:player-joined": { playerName: string; playerIndex: number };
   "room:player-left": { playerIndex: number };
-  "room:lobby-state": { players: LobbyPlayer[] };
+  "room:lobby-state": { players: LobbyPlayer[]; config: LobbyConfig; hostIndex: number };
+  "room:session-ended": { reason: string };
   "chat:message": { playerIndex: number; playerName: string; text: string; timestamp: number };
 }
 
@@ -28,6 +42,8 @@ export interface LobbyPlayer {
   name: string;
   isBot: boolean;
   isReady: boolean;
+  color: string;
+  buildingStyle?: string;
 }
 
 /**

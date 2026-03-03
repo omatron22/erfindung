@@ -11,6 +11,7 @@ import ActionBar from "@/app/components/ui/ActionBar";
 import DiscardDialog from "@/app/components/ui/DiscardDialog";
 import ResourceSelector from "@/app/components/ui/ResourceSelector";
 import ChatBox from "@/app/components/ui/ChatBox";
+import { StylePreview, RuleCard } from "@/app/components/ui/LobbyComponents";
 import { ResourceCard, ResourceIcon } from "@/app/components/icons/ResourceIcons";
 import { VPIcon } from "@/app/components/icons/GameIcons";
 import { SwordPixel, ScrollPixel, CrownPixel } from "@/app/components/icons/PixelIcons";
@@ -21,7 +22,11 @@ import {
 } from "@/app/utils/sounds";
 import type { GameAction } from "@/shared/types/actions";
 import type { Resource, DevelopmentCardType, GameLogEntry } from "@/shared/types/game";
-import type { ClientGameState, LobbyPlayer } from "@/shared/types/messages";
+import { PLAYER_COLORS } from "@/shared/types/game";
+import type { ClientGameState, LobbyPlayer, LobbyConfig } from "@/shared/types/messages";
+import type { BuildingStyle } from "@/shared/types/config";
+import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS } from "@/shared/types/config";
+import { STYLE_DEFS } from "@/shared/buildingStyles";
 import type { VertexKey, EdgeKey, HexKey } from "@/shared/types/coordinates";
 import {
   adjacentVertices,
@@ -49,6 +54,8 @@ export default function OnlineGamePage() {
     playerIndex: myPlayerIndex,
     reconnectToken,
     lobbyPlayers,
+    lobbyConfig,
+    hostIndex,
     gameState,
     lastEvents,
     error,
@@ -69,8 +76,26 @@ export default function OnlineGamePage() {
   const [requesting, setRequesting] = useState<Resource[]>([]);
   const [shakenResource, setShakenResource] = useState<Resource | null>(null);
 
-  // Lobby state
-  const [isHost, setIsHost] = useState(false);
+  // Lobby UI state
+  const [colorPickerOpen, setColorPickerOpen] = useState<number | null>(null);
+  const [stylePickerOpen, setStylePickerOpen] = useState<number | null>(null);
+  const [lobbyChatInput, setLobbyChatInput] = useState("");
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+
+  const isHost = myPlayerIndex === hostIndex;
+
+  // Close color picker on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
+        setColorPickerOpen(null);
+      }
+    }
+    if (colorPickerOpen !== null) {
+      document.addEventListener("mousedown", handleClick);
+      return () => document.removeEventListener("mousedown", handleClick);
+    }
+  }, [colorPickerOpen]);
 
   // --- Socket event listeners ---
   useEffect(() => {
@@ -93,13 +118,18 @@ export default function OnlineGamePage() {
       setTimeout(() => setLocalError(null), 3000);
     };
 
-    const onLobby = ({ players }: { players: LobbyPlayer[] }) => {
-      mpStore.setLobbyPlayers(players);
+    const onLobby = (data: { players: LobbyPlayer[]; config: LobbyConfig; hostIndex: number }) => {
+      mpStore.setLobbyState(data);
     };
 
     const onChat = (msg: { playerIndex: number; playerName: string; text: string; timestamp: number }) => {
       mpStore.addChatMessage(msg);
       playChat();
+    };
+
+    const onSessionEnded = ({ reason }: { reason: string }) => {
+      mpStore.reset();
+      router.push("/");
     };
 
     socket.on("room:joined", onJoined);
@@ -108,6 +138,7 @@ export default function OnlineGamePage() {
     socket.on("game:error", onError);
     socket.on("room:lobby-state", onLobby);
     socket.on("chat:message", onChat);
+    socket.on("room:session-ended", onSessionEnded);
 
     return () => {
       socket.off("room:joined", onJoined);
@@ -116,6 +147,7 @@ export default function OnlineGamePage() {
       socket.off("game:error", onError);
       socket.off("room:lobby-state", onLobby);
       socket.off("chat:message", onChat);
+      socket.off("room:session-ended", onSessionEnded);
     };
   }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -123,11 +155,6 @@ export default function OnlineGamePage() {
   useEffect(() => {
     if (!roomCode) router.push("/");
   }, [roomCode, router]);
-
-  // Track host status
-  useEffect(() => {
-    if (myPlayerIndex === 0) setIsHost(true);
-  }, [myPlayerIndex]);
 
   // Reconnect on page load if we have a token
   useEffect(() => {
@@ -266,11 +293,6 @@ export default function OnlineGamePage() {
     if (!socket) return;
     setLocalError(null);
     socket.emit("game:action", { action });
-
-    // Flash hex lines on 7 (optimistic — server will confirm)
-    if (action.type === "roll-dice") {
-      // Sound will be triggered by events from server
-    }
   }, [socket]);
 
   const handleVertexClick = useCallback((vertex: VertexKey) => {
@@ -394,9 +416,45 @@ export default function OnlineGamePage() {
     socket.emit("room:add-bot", { difficulty: "medium" });
   }
 
-  function handleStartGame() {
+  function handleRemoveBot(playerIndex: number) {
+    if (!socket) return;
+    socket.emit("room:remove-bot", { playerIndex });
+  }
+
+  function handleStartGameClick() {
     if (!socket) return;
     socket.emit("room:start-game", {});
+  }
+
+  function handleUpdateConfig(config: Partial<LobbyConfig>) {
+    if (!socket) return;
+    socket.emit("room:update-config", { config });
+  }
+
+  function handlePickColor(color: string) {
+    if (!socket) return;
+    socket.emit("room:update-player", { color });
+    setColorPickerOpen(null);
+  }
+
+  function handlePickStyle(style: BuildingStyle) {
+    if (!socket) return;
+    socket.emit("room:update-player", { buildingStyle: style });
+    setStylePickerOpen(null);
+  }
+
+  function handleLeaveGame() {
+    if (!socket) return;
+    socket.emit("room:leave-game", {});
+    mpStore.reset();
+    router.push("/");
+  }
+
+  function sendLobbyChat() {
+    if (!socket || !lobbyChatInput.trim()) return;
+    playChat();
+    socket.emit("chat:message", { text: lobbyChatInput.trim() });
+    setLobbyChatInput("");
   }
 
   // --- Render ---
@@ -413,71 +471,376 @@ export default function OnlineGamePage() {
   // Lobby — waiting to start
   if (!gameState) {
     const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/join/${roomCode}` : "";
+    const isExpansion = lobbyPlayers.length >= 5;
+    const usedColors = new Set(lobbyPlayers.map((p) => p.color));
+    const myPlayer = lobbyPlayers.find((p) => p.index === myPlayerIndex);
+
+    const timerIdx = lobbyConfig ? TURN_TIMER_OPTIONS.indexOf(lobbyConfig.turnTimer) : 0;
+    const vpIdx = lobbyConfig ? (VP_OPTIONS as readonly number[]).indexOf(lobbyConfig.vpToWin) : 7;
+
     return (
-      <div className="h-screen flex items-center justify-center bg-[#2a6ab5]">
-        <div className="bg-[#f0e6d0] pixel-border p-8 w-96 text-center">
-          <h1
-            className="font-pixel text-[20px] text-amber-400 mb-2"
-            style={{ textShadow: "2px 2px 0 #000" }}
-          >
-            ERFINDUNG
-          </h1>
-          <p className="font-pixel text-[10px] text-gray-600 mb-1">ROOM CODE</p>
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <span className="font-pixel text-[28px] text-amber-600 tracking-[0.3em]">{roomCode}</span>
-            <button
-              onClick={() => navigator.clipboard.writeText(shareUrl)}
-              className="px-2 py-1 bg-gray-200 border-2 border-black font-pixel text-[7px] hover:bg-gray-300"
-              title="Copy invite link"
+      <div className="min-h-screen flex items-center justify-center bg-[#2a6ab5] overflow-hidden relative">
+        <div className="relative z-10 w-full max-w-5xl px-4">
+          {/* Header + Room Code Banner */}
+          <div className="text-center mb-3">
+            <h1
+              className="font-pixel text-[28px] text-amber-400"
+              style={{ textShadow: "3px 3px 0 #000" }}
             >
-              COPY LINK
-            </button>
+              ERFINDUNG
+            </h1>
+            <div className="flex items-center justify-center gap-3 mt-2">
+              <span className="font-pixel text-[10px] text-white/70">ROOM CODE</span>
+              <span className="font-pixel text-[28px] text-amber-300 tracking-[0.3em]" style={{ textShadow: "2px 2px 0 #000" }}>
+                {roomCode}
+              </span>
+              <button
+                onClick={() => navigator.clipboard.writeText(shareUrl)}
+                className="px-3 py-1.5 bg-white/20 border-2 border-white/40 font-pixel text-[7px] text-white hover:bg-white/30 transition-colors"
+                title="Copy invite link"
+              >
+                COPY LINK
+              </button>
+            </div>
           </div>
 
-          <div className="bg-[#e8d8b8] border-2 border-black p-3 mb-4">
-            <p className="font-pixel text-[8px] text-gray-600 mb-2">PLAYERS ({lobbyPlayers.length}/6)</p>
-            <div className="space-y-1">
-              {lobbyPlayers.map((p) => (
-                <div key={p.index} className="flex items-center justify-between bg-white/50 px-2 py-1 border border-gray-300">
-                  <span className="font-pixel text-[9px] text-gray-800">
-                    {p.name} {p.isBot && <span className="text-gray-500 text-[7px]">(BOT)</span>}
-                  </span>
-                  <span className={`font-pixel text-[7px] ${p.isReady ? "text-green-600" : "text-gray-400"}`}>
-                    {p.isReady ? "READY" : "..."}
-                  </span>
+          {/* 3-column layout */}
+          <div className="flex gap-3 items-start">
+
+            {/* ===== LEFT — Players ===== */}
+            <div className="w-56 shrink-0 flex flex-col gap-3">
+              <div className="bg-[#f0e6d0] pixel-border p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-pixel text-[9px] text-gray-700">
+                    PLAYERS ({lobbyPlayers.length}/{isExpansion ? 6 : 4})
+                  </h2>
                 </div>
-              ))}
+
+                <div className="space-y-2">
+                  {lobbyPlayers.map((player) => {
+                    const isMe = player.index === myPlayerIndex;
+                    return (
+                      <div key={player.index}>
+                        <div className="flex items-center gap-2 bg-[#e8d8b8] px-2 py-1.5 border-2 border-black">
+                          {/* Color swatch */}
+                          <button
+                            className={`w-6 h-6 border-2 border-black shrink-0 relative ${isMe ? "cursor-pointer" : "cursor-default"}`}
+                            style={{ backgroundColor: PLAYER_COLOR_HEX[player.color] ?? "#888" }}
+                            onClick={isMe ? () => { setColorPickerOpen(colorPickerOpen === player.index ? null : player.index); setStylePickerOpen(null); } : undefined}
+                            title={`Color: ${player.color}`}
+                          >
+                            {isMe && (
+                              <span className="absolute inset-0 flex items-center justify-center text-[7px] font-bold"
+                                style={{ color: ["white", "yellow"].includes(player.color) ? "#333" : "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}
+                              >
+                                {colorPickerOpen === player.index ? "\u25B2" : "\u25BC"}
+                              </span>
+                            )}
+                          </button>
+
+                          {/* Name */}
+                          <span className="flex-1 font-pixel text-[8px] text-gray-800 truncate">
+                            {player.name}
+                            {player.isBot && <span className="text-gray-500 text-[6px] ml-1">(BOT)</span>}
+                            {player.index === hostIndex && <span className="text-amber-600 text-[6px] ml-1">HOST</span>}
+                          </span>
+
+                          {/* Building style button — only for own player */}
+                          {isMe && (
+                            <button
+                              className={`w-7 h-7 flex items-center justify-center border-2 shrink-0 ${stylePickerOpen === player.index ? "border-amber-500 bg-amber-50" : "border-gray-400 hover:border-gray-600"}`}
+                              onClick={() => { setStylePickerOpen(stylePickerOpen === player.index ? null : player.index); setColorPickerOpen(null); }}
+                              title={`Style: ${STYLE_DEFS[player.buildingStyle as BuildingStyle ?? DEFAULT_BUILDING_STYLE].name}`}
+                            >
+                              <StylePreview
+                                style={(player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE}
+                                type="settlement"
+                                color={PLAYER_COLOR_HEX[player.color] ?? "#888"}
+                              />
+                            </button>
+                          )}
+
+                          {/* Remove bot button (host only) */}
+                          {isHost && player.isBot && (
+                            <button
+                              className="w-4 h-4 font-pixel text-[9px] text-red-600 hover:text-red-800 shrink-0"
+                              onClick={() => handleRemoveBot(player.index)}
+                              title="Remove bot"
+                            >
+                              X
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Color picker dropdown — only for own player */}
+                        {isMe && colorPickerOpen === player.index && (
+                          <div ref={colorPickerRef} className="bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                            <div className="flex flex-wrap gap-1">
+                              {PLAYER_COLORS.map((c) => {
+                                const isCurrent = player.color === c;
+                                return (
+                                  <button
+                                    key={c}
+                                    className={`relative flex items-center gap-1 px-1.5 py-0.5 border-2 transition-all ${
+                                      isCurrent
+                                        ? "border-gray-900 scale-105"
+                                        : "border-gray-400 hover:border-gray-700 cursor-pointer hover:scale-105"
+                                    }`}
+                                    style={{ backgroundColor: `${PLAYER_COLOR_HEX[c]}25` }}
+                                    onClick={() => handlePickColor(c)}
+                                  >
+                                    <span className="w-3 h-3 border border-black/30 shrink-0" style={{ backgroundColor: PLAYER_COLOR_HEX[c] }} />
+                                    <span className="font-pixel text-[5px] text-gray-700 uppercase">{c}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Style picker dropdown — only for own player */}
+                        {isMe && stylePickerOpen === player.index && (
+                          <div className="bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                            <div className="grid grid-cols-3 gap-1">
+                              {BUILDING_STYLES.map((s) => {
+                                const isCurrent = ((player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE) === s;
+                                return (
+                                  <button
+                                    key={s}
+                                    className={`flex flex-col items-center gap-0.5 px-1 py-1 border-2 transition-all ${
+                                      isCurrent
+                                        ? "border-amber-500 bg-amber-50 scale-105"
+                                        : "border-gray-300 hover:border-gray-600 cursor-pointer hover:scale-105"
+                                    }`}
+                                    onClick={() => handlePickStyle(s)}
+                                  >
+                                    <div className="flex gap-0.5">
+                                      <StylePreview style={s} type="settlement" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
+                                      <StylePreview style={s} type="city" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
+                                    </div>
+                                    <span className="font-pixel text-[5px] text-gray-700">{STYLE_DEFS[s].name.toUpperCase()}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add bot button (host only) */}
+                {isHost && lobbyPlayers.length < 6 && (
+                  <button
+                    onClick={handleAddBot}
+                    className="w-full mt-2 py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342]"
+                  >
+                    + ADD BOT
+                  </button>
+                )}
+              </div>
+
+              {isExpansion && (
+                <div className="bg-amber-100 pixel-border-sm px-3 py-1.5 text-center">
+                  <span className="font-pixel text-[7px] text-amber-700">EXPANSION BOARD</span>
+                </div>
+              )}
+            </div>
+
+            {/* ===== CENTER — Settings ===== */}
+            <div className="flex-1 flex flex-col gap-3 min-w-0">
+              {/* Rules */}
+              <div className="bg-[#f0e6d0] pixel-border p-4">
+                <h2 className="font-pixel text-[9px] text-gray-700 mb-3 text-center">RULES</h2>
+                <div className="flex justify-center gap-3">
+                  <RuleCard
+                    label="FRIENDLY ROBBER"
+                    active={lobbyConfig?.friendlyRobber ?? false}
+                    onClick={isHost ? () => handleUpdateConfig({ friendlyRobber: !(lobbyConfig?.friendlyRobber) }) : undefined}
+                    icon="robber"
+                    disabled={!isHost}
+                  />
+                  <RuleCard
+                    label="BALANCED DICE"
+                    active={lobbyConfig?.fairDice ?? false}
+                    onClick={isHost ? () => handleUpdateConfig({ fairDice: !(lobbyConfig?.fairDice) }) : undefined}
+                    icon="dice"
+                    disabled={!isHost}
+                  />
+                </div>
+              </div>
+
+              {/* Advanced Settings */}
+              <div className="bg-[#f0e6d0] pixel-border p-4">
+                <h2 className="font-pixel text-[9px] text-gray-700 mb-3 text-center">ADVANCED SETTINGS</h2>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Turn Timer */}
+                  <div className="text-center">
+                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">TURN TIMER</span>
+                    {isHost ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          className="font-pixel text-[10px] text-gray-700 hover:text-gray-900 px-1"
+                          onClick={() => timerIdx > 0 && handleUpdateConfig({ turnTimer: TURN_TIMER_OPTIONS[timerIdx - 1] })}
+                        >
+                          &lt;
+                        </button>
+                        <span className="font-pixel text-[9px] text-gray-800 w-10 text-center">
+                          {lobbyConfig?.turnTimer === 0 ? "OFF" : `${lobbyConfig?.turnTimer}s`}
+                        </span>
+                        <button
+                          className="font-pixel text-[10px] text-gray-700 hover:text-gray-900 px-1"
+                          onClick={() => timerIdx < TURN_TIMER_OPTIONS.length - 1 && handleUpdateConfig({ turnTimer: TURN_TIMER_OPTIONS[timerIdx + 1] })}
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="font-pixel text-[9px] text-gray-800">
+                        {lobbyConfig?.turnTimer === 0 ? "OFF" : `${lobbyConfig?.turnTimer}s`}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Game Mode */}
+                  <div className="text-center">
+                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">MODE</span>
+                    {isHost ? (
+                      <div className="flex justify-center">
+                        <button
+                          className={`px-3 py-1 font-pixel text-[7px] border-2 border-black border-r-0 ${
+                            lobbyConfig?.gameMode === "classic" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"
+                          }`}
+                          onClick={() => handleUpdateConfig({ gameMode: "classic" })}
+                        >
+                          CLASSIC
+                        </button>
+                        <button
+                          className={`px-3 py-1 font-pixel text-[7px] border-2 border-black ${
+                            lobbyConfig?.gameMode === "speed" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"
+                          }`}
+                          onClick={() => handleUpdateConfig({ gameMode: "speed" })}
+                        >
+                          SPEED
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="font-pixel text-[9px] text-gray-800 uppercase">
+                        {lobbyConfig?.gameMode ?? "classic"}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Points to Win */}
+                  <div className="text-center">
+                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">POINTS TO WIN</span>
+                    {isHost ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          className="font-pixel text-[10px] text-gray-700 hover:text-gray-900 px-1"
+                          onClick={() => vpIdx > 0 && handleUpdateConfig({ vpToWin: VP_OPTIONS[vpIdx - 1] })}
+                        >
+                          &lt;
+                        </button>
+                        <span className="font-pixel text-[10px] text-amber-600 bg-amber-100 border border-amber-400 w-8 text-center py-0.5">
+                          {lobbyConfig?.vpToWin ?? 10}
+                        </span>
+                        <button
+                          className="font-pixel text-[10px] text-gray-700 hover:text-gray-900 px-1"
+                          onClick={() => vpIdx < VP_OPTIONS.length - 1 && handleUpdateConfig({ vpToWin: VP_OPTIONS[vpIdx + 1] })}
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="font-pixel text-[10px] text-amber-600">
+                        {lobbyConfig?.vpToWin ?? 10}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Max Players */}
+                  <div className="text-center">
+                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">MAX PLAYERS</span>
+                    <span className="font-pixel text-[9px] text-gray-800">
+                      {lobbyPlayers.length}/{isExpansion ? 6 : 4}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error */}
+              {(localError || error) && (
+                <div className="bg-red-100 pixel-border-sm px-3 py-2 text-center">
+                  <p className="font-pixel text-[8px] text-red-700">{localError || error}</p>
+                </div>
+              )}
+
+              {/* Start Game / Waiting */}
+              {isHost ? (
+                <button
+                  onClick={handleStartGameClick}
+                  disabled={lobbyPlayers.length < 2}
+                  className="w-full py-4 bg-amber-400 text-gray-900 font-pixel text-[12px] pixel-btn disabled:opacity-50"
+                >
+                  START GAME
+                </button>
+              ) : (
+                <div className="w-full py-4 text-center">
+                  <p className="font-pixel text-[10px] text-white/70 animate-pulse">
+                    WAITING FOR HOST TO START...
+                  </p>
+                </div>
+              )}
+
+              {!connected && (
+                <p className="font-pixel text-[7px] text-red-400 text-center animate-pulse">DISCONNECTED — RECONNECTING...</p>
+              )}
+            </div>
+
+            {/* ===== RIGHT — Chat ===== */}
+            <div className="w-56 shrink-0">
+              <div className="bg-[#f0e6d0] pixel-border p-4 flex flex-col">
+                <h2 className="font-pixel text-[9px] text-gray-700 mb-2 text-center">CHAT</h2>
+
+                {/* Messages area */}
+                <div className="flex-1 bg-[#e8d8b8] border-2 border-black p-2 mb-2 overflow-y-auto game-log-scroll min-h-[120px] max-h-[400px]">
+                  {chatMessages.length === 0 ? (
+                    <p className="font-pixel text-[7px] text-gray-400 text-center mt-4">No messages yet...</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {chatMessages.map((msg, i) => (
+                        <div key={i}>
+                          <span className="font-pixel text-[7px] text-amber-700 font-bold">{msg.playerName}: </span>
+                          <span className="font-pixel text-[7px] text-gray-700">{msg.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Input */}
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={lobbyChatInput}
+                    onChange={(e) => setLobbyChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && sendLobbyChat()}
+                    placeholder="Send a message..."
+                    className="flex-1 bg-white px-2 py-1 text-[9px] text-gray-800 border-2 border-black focus:outline-none min-w-0"
+                  />
+                  <button
+                    onClick={sendLobbyChat}
+                    className="px-2 py-1 bg-amber-400 border-2 border-black font-pixel text-[8px] hover:bg-amber-500"
+                  >
+                    &gt;
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-
-          {isHost && (
-            <div className="space-y-2">
-              <button
-                onClick={handleAddBot}
-                disabled={lobbyPlayers.length >= 6}
-                className="w-full py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342] disabled:opacity-50"
-              >
-                + ADD BOT
-              </button>
-              <button
-                onClick={handleStartGame}
-                disabled={lobbyPlayers.length < 2}
-                className="w-full py-3 bg-amber-400 text-gray-900 font-pixel text-[11px] pixel-btn disabled:opacity-50"
-              >
-                START GAME
-              </button>
-            </div>
-          )}
-
-          {!isHost && (
-            <p className="font-pixel text-[8px] text-gray-500 animate-pulse">
-              WAITING FOR HOST TO START...
-            </p>
-          )}
-
-          {!connected && (
-            <p className="font-pixel text-[7px] text-red-500 mt-2">DISCONNECTED — RECONNECTING...</p>
-          )}
         </div>
       </div>
     );
@@ -584,6 +947,15 @@ export default function OnlineGamePage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Board */}
         <div className="flex-1 flex items-center justify-center p-1 min-h-0 min-w-0 overflow-hidden relative">
+          {/* Leave game button */}
+          <button
+            onClick={handleLeaveGame}
+            className="absolute top-2 left-2 z-30 px-3 py-1.5 bg-red-600/80 hover:bg-red-600 text-white font-pixel text-[7px] border-2 border-black transition-colors"
+            title="Leave game (replaced by bot)"
+          >
+            LEAVE
+          </button>
+
           <HexBoard
             board={gameState.board}
             size={50}
@@ -958,8 +1330,6 @@ function getStealTargets(state: ClientGameState, playerIndex: number): number[] 
   for (const vk of vertices) {
     const building = state.board.vertices[vk];
     if (building && building.playerIndex !== playerIndex) {
-      // In online mode, we only know resourceCount (not individual resources)
-      // So check resourceCount if available, otherwise assume they have resources
       const player = state.players[building.playerIndex];
       if (player.resourceCount > 0) targets.add(building.playerIndex);
     }
