@@ -188,7 +188,12 @@ export default function GamePage() {
       setTurnDeadline(null); return;
     }
 
-    const deadline = Date.now() + timerSeconds * 1000;
+    // Short timer for quick-action phases, full timer for trade-or-build
+    const QUICK_TIMER = 10;
+    const isQuickPhase = gameState.turnPhase === "roll";
+    const effectiveSeconds = isQuickPhase ? Math.min(QUICK_TIMER, timerSeconds) : timerSeconds;
+
+    const deadline = Date.now() + effectiveSeconds * 1000;
     setTurnDeadline(deadline);
 
     const timeout = setTimeout(() => {
@@ -226,7 +231,7 @@ export default function GamePage() {
           }
         }
       }
-    }, timerSeconds * 1000);
+    }, effectiveSeconds * 1000);
 
     return () => clearTimeout(timeout);
   }, [ // eslint-disable-line react-hooks/exhaustive-deps
@@ -535,9 +540,8 @@ export default function GamePage() {
       buildingStyles={boardBuildingStyles}
       chatLog={gameState.log}
       onSendChat={handleSendChat}
-      onLeave={() => router.push("/")}
-      leaveLabel="BACK TO MENU"
-      leaveClassName=""
+      onMainMenu={() => router.push("/")}
+      onLobby={() => { sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
       flashingHexes={flashingHexes}
       flashSeven={flashSeven}
       turnDeadline={turnDeadline}

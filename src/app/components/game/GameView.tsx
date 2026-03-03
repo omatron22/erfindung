@@ -43,10 +43,9 @@ export interface GameViewProps {
   chatLog: GameLogEntry[];
   onSendChat: (text: string) => void;
 
-  // Navigation button (top corner)
-  onLeave: () => void;
-  leaveLabel: string;
-  leaveClassName: string;
+  // Navigation buttons (settings menu)
+  onMainMenu: () => void;
+  onLobby: () => void;
 
   // Visual effects (managed by parent)
   flashingHexes: Set<HexKey>;
@@ -82,9 +81,8 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     buildingStyles,
     chatLog,
     onSendChat,
-    onLeave,
-    leaveLabel,
-    leaveClassName,
+    onMainMenu,
+    onLobby,
     flashingHexes,
     flashSeven,
     turnDeadline,
@@ -448,12 +446,20 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                     <span className="font-pixel text-[7px] text-gray-300 w-6 text-right">{volume}</span>
                   </div>
                 </div>
-                <button
-                  onClick={onLeave}
-                  className="w-full py-1.5 bg-red-600/80 hover:bg-red-600 text-white font-pixel text-[7px] border-2 border-black transition-colors"
-                >
-                  {leaveLabel}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onLobby}
+                    className="flex-1 py-1.5 bg-amber-600/80 hover:bg-amber-600 text-white font-pixel text-[7px] border-2 border-black transition-colors"
+                  >
+                    LOBBY
+                  </button>
+                  <button
+                    onClick={onMainMenu}
+                    className="flex-1 py-1.5 bg-red-600/80 hover:bg-red-600 text-white font-pixel text-[7px] border-2 border-black transition-colors"
+                  >
+                    MAIN MENU
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -457,9 +457,8 @@ export default function OnlineGamePage() {
       buildingStyles={{}}
       chatLog={chatLog}
       onSendChat={handleSendChat}
-      onLeave={handleLeaveGame}
-      leaveLabel="LEAVE GAME"
-      leaveClassName=""
+      onMainMenu={handleLeaveGame}
+      onLobby={handleLeaveGame}
       flashingHexes={flashingHexes}
       flashSeven={flashSeven}
       turnDeadline={gameState.turnDeadline}

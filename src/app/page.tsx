@@ -54,7 +54,13 @@ const CLOUDS = [
 
 export default function Home() {
   const router = useRouter();
-  const [showLobby, setShowLobby] = useState(false);
+  const [showLobby, setShowLobby] = useState(() => {
+    if (typeof window !== "undefined" && sessionStorage.getItem("catan-auto-lobby")) {
+      sessionStorage.removeItem("catan-auto-lobby");
+      return true;
+    }
+    return false;
+  });
   const [showOnlineLobby, setShowOnlineLobby] = useState(false);
   const [onlineName, setOnlineName] = useState("");
   const [joinCode, setJoinCode] = useState("");
