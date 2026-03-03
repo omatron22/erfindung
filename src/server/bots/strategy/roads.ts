@@ -6,13 +6,15 @@ import {
   adjacentVertices,
 } from "@/shared/utils/hexMath";
 import { scoreVertex } from "./placement";
+import { calculateLongestRoad } from "@/server/engine/longestRoad";
+import type { BotStrategicContext } from "./context";
 
 /**
  * Pick the best edge for road building during main game.
  * Considers: expansion toward good settlements, longest road progress.
  */
-export function pickBuildRoad(state: GameState, playerIndex: number): EdgeKey | null {
-  const player = state.players[playerIndex];
+export function pickBuildRoad(state: GameState, playerIndex: number, context?: BotStrategicContext): EdgeKey | null {
+  const currentRoadLength = context?.ownRoadLength ?? calculateLongestRoad(state, playerIndex);
   let bestEdge: EdgeKey | null = null;
   let bestScore = -Infinity;
 
@@ -28,17 +30,14 @@ export function pickBuildRoad(state: GameState, playerIndex: number): EdgeKey | 
     const [v1, v2] = edgeEndpoints(ek);
 
     for (const v of [v1, v2]) {
-      // Is this end a frontier (no building, no opponent blocking)?
       const building = state.board.vertices[v];
       if (building && building.playerIndex !== playerIndex) continue;
 
       if (!building) {
-        // Score potential settlement site
         const settlementScore = scoreVertex(state, v, playerIndex);
         if (settlementScore > 0) score += settlementScore * 0.5;
       }
 
-      // Also look one step further
       const nextVerts = adjacentVertices(v);
       for (const nv of nextVerts) {
         const ns = scoreVertex(state, nv, playerIndex);
@@ -46,8 +45,30 @@ export function pickBuildRoad(state: GameState, playerIndex: number): EdgeKey | 
       }
     }
 
-    // Bonus for extending longest road
-    score += 2;
+    // --- Longest road awareness ---
+    const simState = simulateRoad(state, playerIndex, ek);
+    const newLength = calculateLongestRoad(simState, playerIndex);
+    const lengthGain = newLength - currentRoadLength;
+
+    if (lengthGain > 0) {
+      score += lengthGain * 3;
+
+      if (context) {
+        // Within 2 of claiming longest road — big bonus
+        if (context.distanceToLongestRoad > 0 && context.distanceToLongestRoad <= 2) {
+          score += 15;
+        }
+        // We hold longest road and an opponent is close — defensive priority
+        if (context.distanceToLongestRoad === 0) {
+          const closestThreat = context.playerThreats.find(
+            (t) => t.roadLength >= currentRoadLength - 1
+          );
+          if (closestThreat) score += 12;
+        }
+      }
+    }
+
+    score += 2; // base tiebreaker
 
     if (score > bestScore) {
       bestScore = score;
@@ -56,6 +77,20 @@ export function pickBuildRoad(state: GameState, playerIndex: number): EdgeKey | 
   }
 
   return bestEdge;
+}
+
+function simulateRoad(state: GameState, playerIndex: number, edge: EdgeKey): GameState {
+  const simPlayers = state.players.map((p, i) =>
+    i === playerIndex
+      ? { ...p, roads: [...p.roads, edge] }
+      : p
+  );
+  const simEdges = { ...state.board.edges, [edge]: { playerIndex } };
+  return {
+    ...state,
+    players: simPlayers,
+    board: { ...state.board, edges: simEdges },
+  } as GameState;
 }
 
 function isConnectedToNetwork(state: GameState, playerIndex: number, edge: EdgeKey): boolean {

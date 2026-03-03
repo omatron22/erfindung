@@ -2,9 +2,10 @@ import type { GameState, Resource } from "@/shared/types/game";
 import type { GameAction } from "@/shared/types/actions";
 import { pickSetupVertex, pickSetupRoad, pickBuildVertex } from "./strategy/placement";
 import { pickBuildRoad } from "./strategy/roads";
-import { pickBankTrade } from "./strategy/trading";
+import { pickBankTrade, shouldRejectLeaderTrade } from "./strategy/trading";
 import { pickRobberHex, pickStealTarget, pickDiscardResources } from "./strategy/robber";
 import { pickDevCardToPlay } from "./strategy/devCards";
+import { computeStrategicContext, type BotStrategicContext } from "./strategy/context";
 import { BUILDING_COSTS, ALL_RESOURCES } from "@/shared/constants";
 import {
   edgesAtVertex,
@@ -34,18 +35,21 @@ export function decideBotAction(state: GameState, botIndex: number): GameAction 
   // Main game
   if (state.phase !== "main") return null;
 
+  // Compute strategic context for main-phase decisions
+  const context = computeStrategicContext(state, botIndex);
+
   switch (state.turnPhase) {
     case "roll":
-      return makeRollOrPlayDevCard(state, botIndex);
+      return makeRollOrPlayDevCard(state, botIndex, context);
     case "robber-place":
-      return makeRobberPlaceAction(state, botIndex);
+      return makeRobberPlaceAction(state, botIndex, context);
     case "robber-steal":
-      return makeStealAction(state, botIndex);
+      return makeStealAction(state, botIndex, context);
     case "trade-or-build":
-      return makeMainPhaseAction(state, botIndex);
+      return makeMainPhaseAction(state, botIndex, context);
     case "road-building-1":
     case "road-building-2":
-      return makeRoadBuildingAction(state, botIndex);
+      return makeRoadBuildingAction(state, botIndex, context);
     case "monopoly":
     case "year-of-plenty":
       return null; // These are handled by dev card play
@@ -71,12 +75,15 @@ function makeSetupAction(state: GameState, botIndex: number): GameAction | null 
   }
 }
 
-function makeRollOrPlayDevCard(state: GameState, botIndex: number): GameAction {
-  // Consider playing a knight before rolling (move robber preemptively)
+function makeRollOrPlayDevCard(state: GameState, botIndex: number, context: BotStrategicContext): GameAction {
   const player = state.players[botIndex];
   if (!player.hasPlayedDevCardThisTurn && player.developmentCards.includes("knight")) {
-    // Play knight ~50% of the time if we have one
-    if (Math.random() < 0.5) {
+    // Army-aware knight play probability before rolling
+    let playProb = 0.3;
+    if (context.distanceToLargestArmy <= 1) playProb = 0.8;
+    else if (context.distanceToLargestArmy <= 2) playProb = 0.6;
+
+    if (Math.random() < playProb) {
       return { type: "play-knight", playerIndex: botIndex };
     }
   }
@@ -84,28 +91,41 @@ function makeRollOrPlayDevCard(state: GameState, botIndex: number): GameAction {
   return { type: "roll-dice", playerIndex: botIndex };
 }
 
-function makeRobberPlaceAction(state: GameState, botIndex: number): GameAction {
-  const hex = pickRobberHex(state, botIndex);
+function makeRobberPlaceAction(state: GameState, botIndex: number, context: BotStrategicContext): GameAction {
+  const hex = pickRobberHex(state, botIndex, context);
   return { type: "move-robber", playerIndex: botIndex, hex };
 }
 
-function makeStealAction(state: GameState, botIndex: number): GameAction | null {
-  const target = pickStealTarget(state, botIndex);
+function makeStealAction(state: GameState, botIndex: number, context: BotStrategicContext): GameAction | null {
+  const target = pickStealTarget(state, botIndex, context);
   if (target === null) return null;
   return { type: "steal-resource", playerIndex: botIndex, targetPlayer: target };
 }
 
 function makeDiscardAction(state: GameState, botIndex: number): GameAction {
-  const resources = pickDiscardResources(state, botIndex);
+  // Compute context for strategy-aware discard
+  let context: BotStrategicContext | undefined;
+  try {
+    context = computeStrategicContext(state, botIndex);
+  } catch {
+    // Fallback to basic discard if context computation fails
+  }
+  const resources = pickDiscardResources(state, botIndex, context);
   return { type: "discard-resources", playerIndex: botIndex, resources };
 }
 
-function makeMainPhaseAction(state: GameState, botIndex: number): GameAction {
+interface BuildOption {
+  name: string;
+  score: number;
+  execute: () => GameAction | null;
+}
+
+function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStrategicContext): GameAction {
   const player = state.players[botIndex];
 
   // 1. Consider playing a dev card
   if (!player.hasPlayedDevCardThisTurn) {
-    const devCard = pickDevCardToPlay(state, botIndex);
+    const devCard = pickDevCardToPlay(state, botIndex, context);
     if (devCard) {
       switch (devCard.card) {
         case "knight":
@@ -129,39 +149,74 @@ function makeMainPhaseAction(state: GameState, botIndex: number): GameAction {
     }
   }
 
-  // 2. Try to build a city (best VP/resource ratio)
+  // 2. Adaptive build priorities — score each option dynamically
+  const options: BuildOption[] = [];
+
+  // City
   if (canAfford(player, BUILDING_COSTS.city) && player.settlements.length > 0) {
-    // Pick the best settlement to upgrade
-    const vertex = player.settlements[0]; // Simple: upgrade first
-    return { type: "build-city", playerIndex: botIndex, vertex };
+    let score = 80;
+    if (context.strategy === "cities") score += 20;
+    options.push({
+      name: "city",
+      score,
+      execute: () => {
+        const vertex = player.settlements[0];
+        return { type: "build-city", playerIndex: botIndex, vertex };
+      },
+    });
   }
 
-  // 3. Try to build a settlement
+  // Dev card
+  if (canAfford(player, BUILDING_COSTS.developmentCard) && state.developmentCardDeck.length > 0) {
+    let score = 30;
+    if (context.distanceToLargestArmy <= 2) score += 60;
+    if (context.distanceToLargestArmy <= 1) score += 80;
+    if (context.strategy === "development") score += 30;
+    options.push({
+      name: "devCard",
+      score,
+      execute: () => ({ type: "buy-development-card", playerIndex: botIndex }),
+    });
+  }
+
+  // Settlement
   if (canAfford(player, BUILDING_COSTS.settlement)) {
     const vertex = pickBuildVertex(state, botIndex);
     if (vertex) {
-      return { type: "build-settlement", playerIndex: botIndex, vertex };
+      let score = 60;
+      if (context.strategy === "expansion") score += 15;
+      options.push({
+        name: "settlement",
+        score,
+        execute: () => ({ type: "build-settlement", playerIndex: botIndex, vertex }),
+      });
     }
   }
 
-  // 4. Try to build a road (if useful for reaching new settlement spots)
+  // Road
   if (canAfford(player, BUILDING_COSTS.road) && player.roads.length < 15) {
-    const edge = pickBuildRoad(state, botIndex);
+    const edge = pickBuildRoad(state, botIndex, context);
     if (edge) {
-      return { type: "build-road", playerIndex: botIndex, edge };
+      let score = 20;
+      if (context.distanceToLongestRoad <= 2) score += 50;
+      if (context.strategy === "expansion") score += 10;
+      options.push({
+        name: "road",
+        score,
+        execute: () => ({ type: "build-road", playerIndex: botIndex, edge }),
+      });
     }
   }
 
-  // 5. Try to buy a dev card
-  if (
-    canAfford(player, BUILDING_COSTS.developmentCard) &&
-    state.developmentCardDeck.length > 0
-  ) {
-    return { type: "buy-development-card", playerIndex: botIndex };
+  // Sort by score descending and try each
+  options.sort((a, b) => b.score - a.score);
+  for (const option of options) {
+    const action = option.execute();
+    if (action) return action;
   }
 
-  // 6. Consider bank trading
-  const bankTrade = pickBankTrade(state, botIndex);
+  // 3. Consider bank trading
+  const bankTrade = pickBankTrade(state, botIndex, context);
   if (bankTrade) {
     return {
       type: "bank-trade",
@@ -172,18 +227,16 @@ function makeMainPhaseAction(state: GameState, botIndex: number): GameAction {
     };
   }
 
-  // 7. Nothing useful to do, end turn
+  // 4. Nothing useful to do, end turn
   return { type: "end-turn", playerIndex: botIndex };
 }
 
-function makeRoadBuildingAction(state: GameState, botIndex: number): GameAction {
-  const edge = pickBuildRoad(state, botIndex);
+function makeRoadBuildingAction(state: GameState, botIndex: number, context: BotStrategicContext): GameAction {
+  const edge = pickBuildRoad(state, botIndex, context);
   if (edge) {
     return { type: "build-road", playerIndex: botIndex, edge };
   }
-  // If no valid road, we still need to handle this — end turn if possible
-  // Actually road building forces road placement, but if no valid spot, turn phase
-  // should auto-advance. For safety, try any valid edge.
+  // Fallback: try any valid edge
   for (const [ek, road] of Object.entries(state.board.edges)) {
     if (road !== null) continue;
     const [v1, v2] = edgeEndpoints(ek);
@@ -202,7 +255,6 @@ function makeRoadBuildingAction(state: GameState, botIndex: number): GameAction 
     }
   }
 
-  // Truly no valid road — this shouldn't happen but handle gracefully
   return { type: "end-turn", playerIndex: botIndex };
 }
 
@@ -218,7 +270,6 @@ function canAfford(
 
 /**
  * Generate a counter-offer from a bot (~30% chance on reject).
- * Returns null if no counter-offer, or { offering, requesting } maps.
  */
 export function generateBotCounterOffer(
   state: GameState,
@@ -227,13 +278,10 @@ export function generateBotCounterOffer(
   const trade = state.pendingTrade;
   if (!trade) return null;
 
-  // ~30% chance to counter-offer
   if (Math.random() > 0.3) return null;
 
   const bot = state.players[botIndex];
 
-  // Counter: offer something the proposer wanted (slightly less), request something the proposer offered
-  // Take one resource from the original requesting and one from offering, tweak amounts
   const requestedKeys = Object.entries(trade.offering)
     .filter(([, amt]) => (amt || 0) > 0)
     .map(([r]) => r as Resource);
@@ -243,14 +291,12 @@ export function generateBotCounterOffer(
 
   if (requestedKeys.length === 0 || offeredKeys.length === 0) return null;
 
-  // Pick a resource the bot can actually give
   const canGive = offeredKeys.filter((r) => bot.resources[r] > 0);
   if (canGive.length === 0) return null;
 
   const giveRes = canGive[Math.floor(Math.random() * canGive.length)];
   const wantRes = requestedKeys[Math.floor(Math.random() * requestedKeys.length)];
 
-  // Give 1 of what they wanted, ask for 1 of what they were offering
   const offering: Partial<Record<Resource, number>> = { [giveRes]: 1 };
   const requesting: Partial<Record<Resource, number>> = { [wantRes]: 1 };
 
@@ -259,7 +305,7 @@ export function generateBotCounterOffer(
 
 /**
  * Decide whether a bot should accept or reject a pending trade offer.
- * Returns "accept" or "reject".
+ * Enhanced: considers leader blocking.
  */
 export function decideBotTradeResponse(state: GameState, botIndex: number): "accept" | "reject" {
   const trade = state.pendingTrade;
@@ -274,9 +320,15 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     if ((amount || 0) > bot.resources[res as Resource]) return "reject";
   }
 
-  // Evaluate: how much does the bot need the offered resources vs the requested ones?
-  // Score = sum of "need" for offered resources - sum of "need" for requested resources
-  // Need is based on how close the bot is to building something that uses that resource
+  // Reject trades that help the VP leader
+  try {
+    const context = computeStrategicContext(state, botIndex);
+    if (shouldRejectLeaderTrade(state, trade.fromPlayer, context)) {
+      return "reject";
+    }
+  } catch {
+    // Fallback to basic evaluation
+  }
 
   const buildPriorities: Array<{ name: string; cost: Partial<Record<Resource, number>> }> = [
     { name: "settlement", cost: BUILDING_COSTS.settlement },
@@ -285,7 +337,6 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     { name: "developmentCard", cost: BUILDING_COSTS.developmentCard },
   ];
 
-  // For each resource, compute a "need score": how many build targets need it and bot is short on it
   function resourceNeed(res: Resource): number {
     let need = 0;
     for (const { cost } of buildPriorities) {
@@ -308,7 +359,6 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     lossScore += resourceNeed(res as Resource) * (amount || 0);
   }
 
-  // Accept if we gain more needed resources than we lose, with some randomness
   const netBenefit = gainScore - lossScore;
   if (netBenefit > 0) return "accept";
   if (netBenefit === 0 && Math.random() < 0.3) return "accept";

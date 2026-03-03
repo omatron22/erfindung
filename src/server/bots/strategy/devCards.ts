@@ -1,5 +1,6 @@
 import type { GameState, Resource, DevelopmentCardType } from "@/shared/types/game";
 import { BUILDING_COSTS, ALL_RESOURCES } from "@/shared/constants";
+import type { BotStrategicContext } from "./context";
 
 /**
  * Decide if and which development card to play.
@@ -7,7 +8,8 @@ import { BUILDING_COSTS, ALL_RESOURCES } from "@/shared/constants";
  */
 export function pickDevCardToPlay(
   state: GameState,
-  playerIndex: number
+  playerIndex: number,
+  context?: BotStrategicContext
 ): { card: DevelopmentCardType; params?: Record<string, unknown> } | null {
   const player = state.players[playerIndex];
   if (player.hasPlayedDevCardThisTurn) return null;
@@ -15,22 +17,40 @@ export function pickDevCardToPlay(
 
   const cards = player.developmentCards;
 
-  // Play knight if we have one (robber is useful, and works toward largest army)
+  // --- Knight with army awareness ---
   if (cards.includes("knight")) {
-    return { card: "knight" };
+    let playProbability = 0.4; // base probability
+
+    if (context) {
+      if (context.distanceToLargestArmy === 0) playProbability = 0.5; // maintain lead
+      else if (context.distanceToLargestArmy <= 1) playProbability = 1.0;
+      else if (context.distanceToLargestArmy <= 2) playProbability = 0.85;
+      else if (context.distanceToLargestArmy <= 3) playProbability = 0.65;
+    }
+
+    if (Math.random() < playProbability) {
+      return { card: "knight" };
+    }
   }
 
-  // Play road building if we have roads to place and < 2 road resources
+  // Play road building if we have roads to place
   if (cards.includes("roadBuilding")) {
-    const canBuildRoads = player.roads.length < 14; // room for 2 more
+    const canBuildRoads = player.roads.length < 14;
     if (canBuildRoads) {
-      return { card: "roadBuilding" };
+      // Higher priority if close to longest road
+      if (context && context.distanceToLongestRoad <= 2) {
+        return { card: "roadBuilding" };
+      }
+      // Still play it with lower priority
+      if (!context || context.strategy === "expansion") {
+        return { card: "roadBuilding" };
+      }
     }
   }
 
   // Play year of plenty to complete a build
   if (cards.includes("yearOfPlenty")) {
-    const needed = getMostNeededResources(state, playerIndex, 2);
+    const needed = getMostNeededResources(state, playerIndex, 2, context);
     if (needed.length > 0) {
       return {
         card: "yearOfPlenty",
@@ -50,17 +70,40 @@ export function pickDevCardToPlay(
     }
   }
 
+  // If we still have an unplayed knight, play it
+  if (cards.includes("knight")) {
+    return { card: "knight" };
+  }
+
   return null;
 }
 
 /**
  * Get the resources we need most, up to `count`.
+ * Enhanced: if close to largest army, prioritize dev card resources.
  */
-function getMostNeededResources(state: GameState, playerIndex: number, count: number): Resource[] {
+function getMostNeededResources(
+  state: GameState,
+  playerIndex: number,
+  count: number,
+  context?: BotStrategicContext
+): Resource[] {
   const player = state.players[playerIndex];
   const needed: Resource[] = [];
 
-  // Check what we're close to affording
+  // If close to army and need dev card, prioritize those resources
+  if (context && context.distanceToLargestArmy <= 2 && context.strategy === "development") {
+    const devCost = BUILDING_COSTS.developmentCard;
+    for (const [res, amount] of Object.entries(devCost)) {
+      if (player.resources[res as Resource] < (amount || 0)) {
+        if (!needed.includes(res as Resource)) {
+          needed.push(res as Resource);
+          if (needed.length >= count) return needed;
+        }
+      }
+    }
+  }
+
   const goals: Array<{ name: string; cost: Partial<Record<Resource, number>> }> = [
     { name: "city", cost: BUILDING_COSTS.city },
     { name: "settlement", cost: BUILDING_COSTS.settlement },
@@ -79,7 +122,6 @@ function getMostNeededResources(state: GameState, playerIndex: number, count: nu
     }
   }
 
-  // If we don't need anything specific, pick ore and grain (toward city)
   if (needed.length === 0) {
     needed.push("ore", "grain");
   }
@@ -89,11 +131,10 @@ function getMostNeededResources(state: GameState, playerIndex: number, count: nu
 
 /**
  * Pick the best resource for monopoly.
- * Target a resource that opponents likely have a lot of.
  */
 function pickMonopolyResource(state: GameState, playerIndex: number): Resource | null {
   let bestResource: Resource | null = null;
-  let bestEstimate = 2; // Only monopoly if we think we'll get at least 3
+  let bestEstimate = 2;
 
   for (const res of ALL_RESOURCES) {
     let totalOpponentCards = 0;

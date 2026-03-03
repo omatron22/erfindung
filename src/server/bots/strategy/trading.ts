@@ -1,5 +1,6 @@
 import type { GameState, Resource } from "@/shared/types/game";
 import { BUILDING_COSTS, ALL_RESOURCES } from "@/shared/constants";
+import type { BotStrategicContext } from "./context";
 
 interface BankTrade {
   giving: Resource;
@@ -9,33 +10,33 @@ interface BankTrade {
 
 /**
  * Decide whether the bot should make a bank trade.
- * Returns a trade if beneficial, null otherwise.
+ * Enhanced: strategy-aware, multi-ratio support.
  */
-export function pickBankTrade(state: GameState, playerIndex: number): BankTrade | null {
+export function pickBankTrade(state: GameState, playerIndex: number, context?: BotStrategicContext): BankTrade | null {
   const player = state.players[playerIndex];
 
-  // Figure out what we're saving toward
-  const needs = getResourceNeeds(state, playerIndex);
+  const needs = getResourceNeeds(state, playerIndex, context);
   if (needs.length === 0) return null;
 
-  // For each needed resource, check if we can bank-trade for it
   for (const needed of needs) {
-    // Find a resource we have excess of
     for (const giving of ALL_RESOURCES) {
       if (giving === needed) continue;
 
       const ratio = getTradeRatio(state, playerIndex, giving);
       if (player.resources[giving] < ratio) continue;
 
-      // Don't trade away resources we also need
+      // Don't trade away resources we also need (unless large surplus)
       const giveNeed = needs.find((n) => n === giving);
-      if (giveNeed && player.resources[giving] <= ratio) continue;
+      if (giveNeed && player.resources[giving] <= ratio + 1) continue;
 
-      // Only trade if we have significant surplus
-      const surplus = player.resources[giving] - ratio;
-      if (surplus < 0) continue;
-
-      return { giving, givingCount: ratio, receiving: needed };
+      // Standard 1x trade
+      if (player.resources[giving] >= ratio) {
+        // Try multi-ratio if large surplus (get 2 of the needed resource)
+        if (player.resources[giving] >= ratio * 2 && !giveNeed) {
+          return { giving, givingCount: ratio * 2, receiving: needed };
+        }
+        return { giving, givingCount: ratio, receiving: needed };
+      }
     }
   }
 
@@ -54,14 +55,13 @@ function getTradeRatio(state: GameState, playerIndex: number, resource: Resource
 
 /**
  * Determine what resources the bot needs most.
- * Returns resources ordered by priority.
+ * Enhanced: strategy-aware prioritization.
  */
-function getResourceNeeds(state: GameState, playerIndex: number): Resource[] {
+function getResourceNeeds(state: GameState, playerIndex: number, context?: BotStrategicContext): Resource[] {
   const player = state.players[playerIndex];
   const needs: Resource[] = [];
 
-  // Check what we can almost afford
-  const goals = getBuildGoals(state, playerIndex);
+  const goals = getBuildGoals(state, playerIndex, context);
 
   for (const goal of goals) {
     const cost = BUILDING_COSTS[goal];
@@ -82,30 +82,52 @@ function getResourceNeeds(state: GameState, playerIndex: number): Resource[] {
 
 /**
  * Determine what the bot should try to build, in priority order.
+ * Enhanced: strategy-aware.
  */
-function getBuildGoals(state: GameState, playerIndex: number): string[] {
+function getBuildGoals(state: GameState, playerIndex: number, context?: BotStrategicContext): string[] {
   const player = state.players[playerIndex];
   const goals: string[] = [];
 
-  // City is high priority if we have settlements
-  if (player.settlements.length > 0 && player.cities.length < 4) {
-    goals.push("city");
-  }
-
-  // Settlement if we have road connections to good spots
-  if (player.settlements.length < 5) {
-    goals.push("settlement");
-  }
-
-  // Roads to expand network
-  if (player.roads.length < 15) {
-    goals.push("road");
-  }
-
-  // Dev cards for knights/VPs
-  if (state.developmentCardDeck.length > 0) {
-    goals.push("developmentCard");
+  if (context) {
+    // Use strategy to prioritize
+    if (context.strategy === "cities") {
+      if (player.settlements.length > 0) goals.push("city");
+      if (state.developmentCardDeck.length > 0) goals.push("developmentCard");
+      if (player.settlements.length < 5) goals.push("settlement");
+      if (player.roads.length < 15) goals.push("road");
+    } else if (context.strategy === "development") {
+      if (state.developmentCardDeck.length > 0) goals.push("developmentCard");
+      if (player.settlements.length > 0) goals.push("city");
+      if (player.settlements.length < 5) goals.push("settlement");
+      if (player.roads.length < 15) goals.push("road");
+    } else {
+      // expansion
+      if (player.settlements.length < 5) goals.push("settlement");
+      if (player.roads.length < 15) goals.push("road");
+      if (player.settlements.length > 0) goals.push("city");
+      if (state.developmentCardDeck.length > 0) goals.push("developmentCard");
+    }
+  } else {
+    if (player.settlements.length > 0 && player.cities.length < 4) goals.push("city");
+    if (player.settlements.length < 5) goals.push("settlement");
+    if (player.roads.length < 15) goals.push("road");
+    if (state.developmentCardDeck.length > 0) goals.push("developmentCard");
   }
 
   return goals;
+}
+
+/**
+ * Should bot reject a trade that helps the VP leader?
+ */
+export function shouldRejectLeaderTrade(
+  state: GameState,
+  fromPlayer: number,
+  context: BotStrategicContext
+): boolean {
+  if (context.playerThreats.length === 0) return false;
+  const leader = context.playerThreats[0];
+  if (leader.playerIndex !== fromPlayer) return false;
+  // Reject if leader is within 2 VP of winning
+  return leader.visibleVP >= context.vpToWin - 2;
 }

@@ -113,6 +113,16 @@ body {
   animation: hex-flash 0.5s ease-in-out 4;
 }
 
+/* Flash animation for resource-producing hexes on dice roll */
+@keyframes hex-flash-resource {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.6); }
+}
+
+.hex-flash-resource {
+  animation: hex-flash-resource 0.5s ease-in-out 3;
+}
+
 /* Dice throb animation to prompt user to click */
 @keyframes dice-throb {
   0%, 100% { transform: scale(1); }

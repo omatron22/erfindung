@@ -762,8 +762,8 @@ function handleBankTrade(
   if (givingCount < minRatio) {
     return { valid: false, error: `Need at least ${minRatio} ${giving} to trade` };
   }
-  if (givingCount !== minRatio) {
-    return { valid: false, error: `Must give exactly ${minRatio} of the resource` };
+  if (givingCount % minRatio !== 0) {
+    return { valid: false, error: `Must give a multiple of ${minRatio} of the resource` };
   }
   if (player.resources[giving] < givingCount) {
     return { valid: false, error: "Not enough resources" };
@@ -772,14 +772,15 @@ function handleBankTrade(
     return { valid: false, error: "Cannot trade for the same resource" };
   }
 
+  const receivingCount = givingCount / minRatio;
   const newState = cloneState(state);
   newState.players[playerIndex].resources[giving] -= givingCount;
-  newState.players[playerIndex].resources[receiving] += 1;
+  newState.players[playerIndex].resources[receiving] += receivingCount;
 
   newState.log.push({
     timestamp: Date.now(),
     playerIndex,
-    message: `${newState.players[playerIndex].name} traded ${givingCount} ${giving} for 1 ${receiving} with the bank`,
+    message: `${newState.players[playerIndex].name} traded ${givingCount} ${giving} for ${receivingCount} ${receiving} with the bank`,
     type: "action",
   });
 

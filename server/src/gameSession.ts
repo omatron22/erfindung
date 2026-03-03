@@ -97,6 +97,8 @@ export function broadcastState(io: TypedServer, room: Room) {
   for (const slot of room.players) {
     if (slot.socketId && !slot.isBot) {
       const clientState = filterStateForPlayer(room.gameState, slot.index);
+      // Attach turn deadline for timer display
+      (clientState as any).turnDeadline = room.turnDeadline ?? null;
       io.to(slot.socketId).emit("game:state", { state: clientState });
     }
   }

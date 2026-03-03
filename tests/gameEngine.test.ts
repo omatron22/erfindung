@@ -296,6 +296,47 @@ describe("Trading", () => {
     });
     expect(result.valid).toBe(false);
   });
+
+  it("allows multi-ratio bank trade (8:2 at 4:1)", () => {
+    state.players[0].resources.brick = 8;
+    const result = applyAction(state, {
+      type: "bank-trade",
+      playerIndex: 0,
+      giving: "brick",
+      givingCount: 8,
+      receiving: "ore",
+    });
+    expect(result.valid).toBe(true);
+    expect(result.newState!.players[0].resources.brick).toBe(0);
+    expect(result.newState!.players[0].resources.ore).toBe(state.players[0].resources.ore + 2);
+  });
+
+  it("allows multi-ratio bank trade with port (4:2 at 2:1)", () => {
+    state.players[0].resources.brick = 4;
+    state.players[0].portsAccess = ["brick"];
+    const result = applyAction(state, {
+      type: "bank-trade",
+      playerIndex: 0,
+      giving: "brick",
+      givingCount: 4,
+      receiving: "ore",
+    });
+    expect(result.valid).toBe(true);
+    expect(result.newState!.players[0].resources.brick).toBe(0);
+    expect(result.newState!.players[0].resources.ore).toBe(state.players[0].resources.ore + 2);
+  });
+
+  it("rejects non-multiple bank trade amount", () => {
+    state.players[0].resources.brick = 5;
+    const result = applyAction(state, {
+      type: "bank-trade",
+      playerIndex: 0,
+      giving: "brick",
+      givingCount: 5,
+      receiving: "ore",
+    });
+    expect(result.valid).toBe(false);
+  });
 });
 
 describe("Development Cards", () => {

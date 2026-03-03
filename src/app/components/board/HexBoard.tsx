@@ -17,6 +17,7 @@ interface Props {
   highlightedVertices?: Set<VertexKey>;
   highlightedEdges?: Set<EdgeKey>;
   highlightedHexes?: Set<HexKey>;
+  flashingHexes?: Set<HexKey>;
   flashSeven?: boolean;
   playerColors?: Record<number, string>;
   buildingStyles?: Record<number, BuildingStyle>;
@@ -36,6 +37,7 @@ export default function HexBoard({
   highlightedVertices,
   highlightedEdges,
   highlightedHexes,
+  flashingHexes,
   flashSeven,
   playerColors,
   buildingStyles,
@@ -139,6 +141,7 @@ export default function HexBoard({
               hex={hex}
               size={size}
               highlighted={highlightedHexes?.has(key)}
+              flashing={flashingHexes?.has(key)}
               flashSeven={flashSeven}
               onClick={onHexClick ? () => { if (!dragMoved.current) onHexClick(key); } : undefined}
             />

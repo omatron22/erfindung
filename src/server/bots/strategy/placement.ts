@@ -10,6 +10,7 @@ import {
   hexVertices,
 } from "@/shared/utils/hexMath";
 import { NUMBER_DOTS, TERRAIN_RESOURCE } from "@/shared/constants";
+import type { BotStrategicContext } from "./context";
 
 /**
  * Score a vertex for settlement placement.
@@ -190,4 +191,74 @@ function getResourcesAtVertex(state: GameState, vertex: VertexKey): Resource[] {
     if (resource) resources.push(resource);
   }
   return resources;
+}
+
+/**
+ * Enhanced vertex scoring that uses the bot's strategic context.
+ * Adds expansion potential, strategy weighting, and complementary resource bonuses.
+ */
+export function scoreVertexEnhanced(
+  state: GameState,
+  vertex: VertexKey,
+  playerIndex: number,
+  context: BotStrategicContext
+): number {
+  const base = scoreVertex(state, vertex, playerIndex);
+  if (base < 0) return base;
+
+  let score = base;
+  const adjacentHexes = hexesAdjacentToVertex(vertex);
+  const resourceTypes = new Set<Resource>();
+
+  for (const hexCoord of adjacentHexes) {
+    const hex = state.board.hexes[hexKey(hexCoord)];
+    if (!hex) continue;
+    const resource = TERRAIN_RESOURCE[hex.terrain];
+    if (resource && hex.number) resourceTypes.add(resource);
+  }
+
+  // --- Strategy weighting ---
+  const strategyResources: Record<string, Resource[]> = {
+    expansion: ["brick", "lumber"],
+    cities: ["ore", "grain"],
+    development: ["wool", "ore", "grain"],
+  };
+  const preferred = strategyResources[context.strategy] || [];
+  for (const res of preferred) {
+    if (resourceTypes.has(res)) score += 2;
+  }
+
+  // --- Complementary resources: big bonus for resources bot doesn't produce ---
+  for (const res of context.missingResources) {
+    if (resourceTypes.has(res)) score += 5;
+  }
+
+  // --- Port strategic value ---
+  for (const port of state.board.ports) {
+    if (!port.edgeVertices.includes(vertex)) continue;
+    if (port.type !== "any") {
+      const portRes = port.type as Resource;
+      // High production + matching port = big bonus
+      if (context.productionRates[portRes] > 0.15) {
+        score += 6;
+      }
+    }
+  }
+
+  // --- Expansion potential (2-edge-deep lookahead) ---
+  let expansionBonus = 0;
+  const adjVerts = adjacentVertices(vertex);
+  for (const av of adjVerts) {
+    const avScore = scoreVertex(state, av, playerIndex);
+    if (avScore > 0) expansionBonus += avScore * 0.15;
+    // Second hop
+    const secondHop = adjacentVertices(av);
+    for (const sv of secondHop) {
+      const svScore = scoreVertex(state, sv, playerIndex);
+      if (svScore > 0) expansionBonus += svScore * 0.05;
+    }
+  }
+  score += expansionBonus;
+
+  return score;
 }

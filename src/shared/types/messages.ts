@@ -55,6 +55,7 @@ export interface ClientGameState extends Omit<GameState, "players" | "developmen
   players: ClientPlayerState[];
   developmentCardDeckCount: number;
   myPlayerIndex: number;
+  turnDeadline?: number | null;
 }
 
 export interface ClientPlayerState extends Omit<PlayerState, "developmentCards" | "newDevelopmentCards"> {

@@ -140,7 +140,10 @@ export default function Home() {
     setValidationError(null);
 
     // Validation
-    const names = players.map((p) => (p.isBot ? p.name : p.name.trim() || "You"));
+    const names = players.map((p, i) => {
+      if (p.isBot) return p.name.trim() || BOT_NAMES[i - 1] || `Bot ${i}`;
+      return p.name.trim() || "You";
+    });
     if (players.length < 2) {
       setValidationError("Need at least 2 players");
       return;
@@ -391,7 +394,7 @@ export default function Home() {
 
             <div className="space-y-2">
               {players.map((player, idx) => (
-                <div key={idx}>
+                <div key={idx} className="relative">
                   <div className="flex items-center gap-2 bg-[#e8d8b8] px-2 py-1.5 border-2 border-black">
                     {/* Color swatch */}
                     <button
@@ -408,20 +411,16 @@ export default function Home() {
                     </button>
 
                     {/* Name */}
-                    {idx === 0 ? (
-                      <input
-                        type="text"
-                        value={player.name}
-                        onChange={(e) => updatePlayer(idx, { name: e.target.value })}
-                        placeholder="Your name..."
-                        className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
-                        autoFocus
-                      />
-                    ) : (
-                      <span className="flex-1 font-pixel text-[8px] text-gray-800 truncate">
-                        {player.name}{" "}
-                        <span className="text-gray-500 text-[6px]">(BOT)</span>
-                      </span>
+                    <input
+                      type="text"
+                      value={player.name}
+                      onChange={(e) => updatePlayer(idx, { name: e.target.value })}
+                      placeholder={idx === 0 ? "Your name..." : "Bot name..."}
+                      className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
+                      autoFocus={idx === 0}
+                    />
+                    {player.isBot && (
+                      <span className="font-pixel text-[6px] text-gray-500 shrink-0">(BOT)</span>
                     )}
 
                     {/* Building style */}
@@ -481,7 +480,7 @@ export default function Home() {
 
                   {/* Style picker dropdown */}
                   {stylePickerOpen === idx && (
-                    <div className="bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                    <div className="absolute left-0 z-50 w-64 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
                       <div className="grid grid-cols-3 gap-1">
                         {BUILDING_STYLES.map((s) => {
                           const isCurrent = (buildingStyles[idx] ?? DEFAULT_BUILDING_STYLE) === s;

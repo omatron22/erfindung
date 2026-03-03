@@ -6,23 +6,31 @@ import {
   hexKey,
 } from "@/shared/utils/hexMath";
 import { NUMBER_DOTS, TERRAIN_RESOURCE } from "@/shared/constants";
+import type { BotStrategicContext } from "./context";
 
 /**
  * Pick the best hex to place the robber.
- * Targets the leading opponent on a high-probability hex.
+ * Enhanced: uses threat scores and strategy-aware blocking.
  */
-export function pickRobberHex(state: GameState, playerIndex: number): HexKey {
+export function pickRobberHex(state: GameState, playerIndex: number, context?: BotStrategicContext): HexKey {
   let bestHex: HexKey | null = null;
   let bestScore = -Infinity;
 
+  // Build a threat lookup for fast access
+  const threatByPlayer: Record<number, number> = {};
+  if (context) {
+    for (const t of context.playerThreats) {
+      threatByPlayer[t.playerIndex] = t.threatScore;
+    }
+  }
+
   for (const [hk, hex] of Object.entries(state.board.hexes)) {
-    if (hk === state.board.robberHex) continue; // Must move to different hex
-    if (hex.terrain === "desert") continue; // Don't put on desert (wastes robber)
+    if (hk === state.board.robberHex) continue;
+    if (hex.terrain === "desert") continue;
 
     const dots = hex.number ? (NUMBER_DOTS[hex.number] || 0) : 0;
     let score = 0;
 
-    // Check who has buildings on this hex
     const vertices = hexVertices(hex.coord);
     let affectsOpponent = false;
     let affectsSelf = false;
@@ -35,20 +43,26 @@ export function pickRobberHex(state: GameState, playerIndex: number): HexKey {
         affectsSelf = true;
       } else {
         affectsOpponent = true;
-        const opponent = state.players[building.playerIndex];
-        // Prefer blocking the leader
-        score += opponent.victoryPoints * 2;
-        // Bonus for blocking cities (they produce more)
-        if (building.type === "city") score += 3;
-        else score += 1;
+        const buildingMult = building.type === "city" ? 2 : 1;
+
+        if (context) {
+          // Use threat score instead of raw VP
+          const threat = threatByPlayer[building.playerIndex] ?? 0;
+          score += threat * dots * buildingMult * 0.5;
+        } else {
+          const opponent = state.players[building.playerIndex];
+          score += opponent.victoryPoints * 2;
+          if (building.type === "city") score += 3;
+          else score += 1;
+          score += dots;
+        }
       }
     }
 
-    if (!affectsOpponent) continue; // Don't place where it doesn't hurt opponents
-    if (affectsSelf) score -= 10; // Big penalty for hurting ourselves
+    if (!affectsOpponent) continue;
+    if (affectsSelf) score -= 15;
 
-    // Prefer high-probability hexes
-    score += dots;
+    if (!context) score += dots;
 
     if (score > bestScore) {
       bestScore = score;
@@ -56,7 +70,7 @@ export function pickRobberHex(state: GameState, playerIndex: number): HexKey {
     }
   }
 
-  // Fallback: just pick any valid hex
+  // Fallback
   if (!bestHex) {
     for (const hk of Object.keys(state.board.hexes)) {
       if (hk !== state.board.robberHex) {
@@ -71,8 +85,9 @@ export function pickRobberHex(state: GameState, playerIndex: number): HexKey {
 
 /**
  * Pick which player to steal from at the robber hex.
+ * Enhanced: uses threat scores.
  */
-export function pickStealTarget(state: GameState, playerIndex: number): number | null {
+export function pickStealTarget(state: GameState, playerIndex: number, context?: BotStrategicContext): number | null {
   const hexCoord = parseHexKey(state.board.robberHex);
   const vertices = hexVertices(hexCoord);
   const candidates: { player: number; score: number }[] = [];
@@ -85,45 +100,58 @@ export function pickStealTarget(state: GameState, playerIndex: number): number |
     const resourceCount = Object.values(target.resources).reduce((s, n) => s + n, 0);
     if (resourceCount === 0) continue;
 
-    // Already have this player?
     const existing = candidates.find((c) => c.player === building.playerIndex);
     if (existing) continue;
 
-    candidates.push({
-      player: building.playerIndex,
-      score: target.victoryPoints * 3 + resourceCount,
-    });
+    let score: number;
+    if (context) {
+      const threat = context.playerThreats.find((t) => t.playerIndex === building.playerIndex);
+      score = (threat?.threatScore ?? target.victoryPoints) * 3 + resourceCount;
+    } else {
+      score = target.victoryPoints * 3 + resourceCount;
+    }
+
+    candidates.push({ player: building.playerIndex, score });
   }
 
   if (candidates.length === 0) return null;
-
-  // Pick the leader (highest score)
   candidates.sort((a, b) => b.score - a.score);
   return candidates[0].player;
 }
 
 /**
  * Pick which resources to discard when a 7 is rolled.
- * Keeps the most valuable resources, discards the least useful.
+ * Enhanced: keeps resources aligned with current strategy.
  */
 export function pickDiscardResources(
   state: GameState,
-  playerIndex: number
+  playerIndex: number,
+  context?: BotStrategicContext
 ): Partial<Record<Resource, number>> {
   const player = state.players[playerIndex];
   const total = Object.values(player.resources).reduce((s, n) => s + n, 0);
   const discardCount = Math.floor(total / 2);
 
-  // Rank resources by value (keep the most useful ones)
+  // Strategy-aware resource values
   const resourceValue: Record<Resource, number> = {
-    ore: 4,    // cities
-    grain: 3,  // cities + settlements
-    wool: 2,   // settlements + dev cards
-    brick: 2,  // roads + settlements
-    lumber: 2, // roads + settlements
+    ore: 4, grain: 3, wool: 2, brick: 2, lumber: 2,
   };
 
-  // Build a list of all resource cards, sorted by value ascending (discard least valuable first)
+  if (context) {
+    // Boost value of resources matching strategy
+    if (context.strategy === "expansion") {
+      resourceValue.brick = 4;
+      resourceValue.lumber = 4;
+    } else if (context.strategy === "cities") {
+      resourceValue.ore = 5;
+      resourceValue.grain = 4;
+    } else if (context.strategy === "development") {
+      resourceValue.wool = 4;
+      resourceValue.ore = 5;
+      resourceValue.grain = 3;
+    }
+  }
+
   const cards: { resource: Resource; value: number }[] = [];
   for (const [res, count] of Object.entries(player.resources)) {
     for (let i = 0; i < count; i++) {
@@ -132,7 +160,6 @@ export function pickDiscardResources(
   }
   cards.sort((a, b) => a.value - b.value);
 
-  // Discard the least valuable cards
   const discard: Partial<Record<Resource, number>> = {};
   for (let i = 0; i < discardCount && i < cards.length; i++) {
     const res = cards[i].resource;
