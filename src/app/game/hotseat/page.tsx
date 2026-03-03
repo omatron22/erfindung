@@ -118,6 +118,23 @@ export default function GamePage() {
     const result = applyAction(state, action);
     if (result.valid && result.newState) {
       playActionSound(action.type);
+      // Flash hexes for bot dice rolls (same logic as human handleAction)
+      if (action.type === "roll-dice" && result.newState.lastDiceRoll) {
+        const total = result.newState.lastDiceRoll.die1 + result.newState.lastDiceRoll.die2;
+        if (total === 7) {
+          setFlashSeven(true);
+          setTimeout(() => setFlashSeven(false), 2000);
+        } else {
+          const producing = new Set<HexKey>();
+          for (const [key, hex] of Object.entries(result.newState.board.hexes)) {
+            if (hex.number === total && !hex.hasRobber) producing.add(key);
+          }
+          if (producing.size > 0) {
+            setFlashingHexes(producing);
+            setTimeout(() => setFlashingHexes(new Set()), 1500);
+          }
+        }
+      }
       setGameState(result.newState);
     } else {
       console.warn(`Bot ${botIndex} invalid action:`, action.type, result.error);
@@ -146,22 +163,76 @@ export default function GamePage() {
     }
   }, [gameState?.pendingTrade]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- Turn timer (hotseat local) ---
+  // --- Comprehensive turn timer (hotseat local) ---
+  const gameStateRef = useRef<GameState | null>(null);
+  gameStateRef.current = gameState;
+
   useEffect(() => {
     const timerSeconds = fullConfig?.turnTimer;
-    if (!timerSeconds || !gameState || gameState.phase === "finished") {
+    if (!timerSeconds || !gameState || gameState.phase === "finished" || gameState.phase === "waiting") {
       setTurnDeadline(null); return;
     }
-    if (gameState.currentPlayerIndex !== HUMAN_PLAYER_INDEX || gameState.phase !== "main") {
+
+    const isHumanTurn = gameState.currentPlayerIndex === HUMAN_PLAYER_INDEX;
+    const needsHumanDiscard = gameState.turnPhase === "discard" &&
+      gameState.discardingPlayers.includes(HUMAN_PLAYER_INDEX);
+
+    // Setup phases: timer only when it's the human's turn
+    const isSetup = gameState.phase === "setup-forward" || gameState.phase === "setup-reverse";
+    const humanNeedsToAct =
+      (isSetup && isHumanTurn) ||
+      (gameState.phase === "main" && isHumanTurn) ||
+      needsHumanDiscard;
+
+    if (!humanNeedsToAct) {
       setTurnDeadline(null); return;
     }
+
     const deadline = Date.now() + timerSeconds * 1000;
     setTurnDeadline(deadline);
+
     const timeout = setTimeout(() => {
-      handleAction({ type: "end-turn", playerIndex: HUMAN_PLAYER_INDEX });
+      const state = gameStateRef.current;
+      if (!state) return;
+
+      if (state.phase === "main" && state.turnPhase === "trade-or-build") {
+        // Auto end-turn (original behavior)
+        handleAction({ type: "end-turn", playerIndex: HUMAN_PLAYER_INDEX });
+      } else {
+        // For all other phases (setup, roll, discard, robber), let the bot AI decide
+        const action = decideBotAction(state, HUMAN_PLAYER_INDEX);
+        if (action) {
+          const result = applyAction(state, action);
+          if (result.valid && result.newState) {
+            playActionSound(action.type);
+            // Flash hexes if auto-roll
+            if (action.type === "roll-dice" && result.newState.lastDiceRoll) {
+              const total = result.newState.lastDiceRoll.die1 + result.newState.lastDiceRoll.die2;
+              if (total === 7) {
+                setFlashSeven(true);
+                setTimeout(() => setFlashSeven(false), 2000);
+              } else {
+                const producing = new Set<HexKey>();
+                for (const [key, hex] of Object.entries(result.newState.board.hexes)) {
+                  if (hex.number === total && !hex.hasRobber) producing.add(key);
+                }
+                if (producing.size > 0) {
+                  setFlashingHexes(producing);
+                  setTimeout(() => setFlashingHexes(new Set()), 1500);
+                }
+              }
+            }
+            setGameState(result.newState);
+          }
+        }
+      }
     }, timerSeconds * 1000);
+
     return () => clearTimeout(timeout);
-  }, [gameState?.currentPlayerIndex, gameState?.phase, fullConfig?.turnTimer]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ // eslint-disable-line react-hooks/exhaustive-deps
+    gameState?.currentPlayerIndex, gameState?.phase, gameState?.turnPhase,
+    gameState?.setupPlacementsMade, gameState?.discardingPlayers, fullConfig?.turnTimer,
+  ]);
 
   // === SOUND EFFECTS ===
   const prevPlayerRef = useRef<number | null>(null);
@@ -465,8 +536,8 @@ export default function GamePage() {
       chatLog={gameState.log}
       onSendChat={handleSendChat}
       onLeave={() => router.push("/")}
-      leaveLabel="MENU"
-      leaveClassName="absolute top-2 left-2 z-30 px-3 py-1.5 bg-[#1a1a2e]/90 border-2 border-[#3a3a5e] font-pixel text-[8px] text-gray-300 hover:text-white hover:bg-[#1a1a2e]"
+      leaveLabel="BACK TO MENU"
+      leaveClassName=""
       flashingHexes={flashingHexes}
       flashSeven={flashSeven}
       turnDeadline={turnDeadline}

@@ -24,6 +24,7 @@ import {
   MAX_ROADS, MAX_SETTLEMENTS, MAX_CITIES,
   EXPANSION_MAX_ROADS, EXPANSION_MAX_SETTLEMENTS, EXPANSION_MAX_CITIES,
 } from "@/shared/constants";
+import { getMasterVolume, setMasterVolume } from "@/app/utils/sounds";
 
 type AnyGameState = GameState | ClientGameState;
 
@@ -95,6 +96,21 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     onAddToRequesting,
   } = props;
 
+  // --- Settings panel ---
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [volume, setVolume] = useState(getMasterVolume());
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  // Close settings on outside click
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setSettingsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [settingsOpen]);
+
   // --- Active action state ---
   const [activeAction, setActiveAction] = useState<string | null>(null);
 
@@ -102,9 +118,6 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   const [discardSelection, setDiscardSelection] = useState<Record<Resource, number>>({
     brick: 0, lumber: 0, ore: 0, grain: 0, wool: 0,
   });
-
-  // --- Bank trade open state (Fix 5) ---
-  const [bankTradeOpen, setBankTradeOpen] = useState(false);
 
   // --- Trade UI ---
   const myPlayer = gameState.players[myPlayerIndex];
@@ -118,6 +131,31 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   useImperativeHandle(ref, () => ({
     closeTrade: trade.closeTrade,
   }));
+
+  // --- Resource change notifications ---
+  const prevResourcesRef = useRef<Record<Resource, number> | null>(null);
+  const [resourceNotifs, setResourceNotifs] = useState<Array<{ id: number; resource: Resource; delta: number }>>([]);
+  const notifIdRef = useRef(0);
+
+  useEffect(() => {
+    const curr = myPlayer.resources as Record<Resource, number>;
+    const prev = prevResourcesRef.current;
+    prevResourcesRef.current = { ...curr };
+    if (!prev) return;
+    const notifs: Array<{ id: number; resource: Resource; delta: number }> = [];
+    for (const res of ALL_RESOURCES) {
+      const diff = curr[res] - prev[res];
+      if (diff !== 0) {
+        notifs.push({ id: ++notifIdRef.current, resource: res, delta: diff });
+      }
+    }
+    if (notifs.length > 0) {
+      setResourceNotifs((old) => [...old, ...notifs]);
+      setTimeout(() => {
+        setResourceNotifs((old) => old.filter((n) => !notifs.some((added) => added.id === n.id)));
+      }, 1200);
+    }
+  }, [myPlayer.resources]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Expansion board limits ---
   const expansion = gameState.config?.expansionBoard ?? false;
@@ -170,7 +208,6 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   // --- Reset trade mode on turn change ---
   useEffect(() => {
     trade.closeTrade();
-    setBankTradeOpen(false);
   }, [gameState.currentPlayerIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Reset discard selection when discard phase ends ---
@@ -218,7 +255,6 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     if (action === "trade") {
       trade.setTradeMode(true);
       setActiveAction(null);
-      setBankTradeOpen(false);
     } else if (action === null) {
       // When explicitly deselecting, go back to auto-build if in trade-or-build
       if (canTradeOrBuild) {
@@ -229,24 +265,39 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     } else {
       setActiveAction(action);
       trade.closeTrade();
-      setBankTradeOpen(false);
     }
   }, [trade, canTradeOrBuild]);
 
-  // --- Bank trade handler ---
-  function handleBankTrade(giving: Resource, receiving: Resource) {
+  // --- Simplified bank trade handler ---
+  // Validates offering (all same resource, multiple of ratio) and requesting
+  // (count matches, no overlap with giving resource), then fires one action per
+  // unique requested resource.
+  function handleBankTradeSimple() {
     const info = trade.getBankTradeInfo();
-    if (!info) return;
-    if (myPlayer.resources[giving] < info.ratio * info.receivingCount) return;
-    onAction({
-      type: "bank-trade",
-      playerIndex: myPlayerIndex,
-      giving,
-      givingCount: info.ratio * info.receivingCount,
-      receiving,
-    });
+    if (!info || trade.requesting.length === 0) return;
+    // Requesting must not include the giving resource
+    if (trade.requesting.some((r) => r === info.giving)) return;
+    // Requesting count must equal receivingCount
+    if (trade.requesting.length !== info.receivingCount) return;
+
+    // Group requesting by resource type
+    const reqCounts: Partial<Record<Resource, number>> = {};
+    for (const r of trade.requesting) reqCounts[r] = (reqCounts[r] || 0) + 1;
+
+    // Fire one bank-trade per unique requested resource
+    // Each action trades ratio cards for 1 of that resource
+    for (const [res, count] of Object.entries(reqCounts) as [Resource, number][]) {
+      for (let i = 0; i < count; i++) {
+        onAction({
+          type: "bank-trade",
+          playerIndex: myPlayerIndex,
+          giving: info.giving,
+          givingCount: info.ratio,
+          receiving: res,
+        });
+      }
+    }
     trade.closeTrade();
-    setBankTradeOpen(false);
   }
 
   // --- Player trade handler ---
@@ -361,13 +412,51 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
             onHexClick={isMyTurn ? handleHexClick : undefined}
           />
 
-          {/* Navigation button */}
-          <button
-            onClick={onLeave}
-            className={leaveClassName}
-          >
-            {leaveLabel}
-          </button>
+          {/* Settings gear */}
+          <div className="absolute top-2 left-2 z-30" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              className="w-8 h-8 flex items-center justify-center bg-[#1a1a2e]/90 border-2 border-[#3a3a5e] text-gray-300 hover:text-white hover:bg-[#1a1a2e] transition-colors"
+              title="Settings"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" shapeRendering="crispEdges">
+                <rect x="6" y="0" width="4" height="2" />
+                <rect x="6" y="14" width="4" height="2" />
+                <rect x="0" y="6" width="2" height="4" />
+                <rect x="14" y="6" width="2" height="4" />
+                <rect x="2" y="2" width="2" height="2" />
+                <rect x="12" y="2" width="2" height="2" />
+                <rect x="2" y="12" width="2" height="2" />
+                <rect x="12" y="12" width="2" height="2" />
+                <rect x="4" y="4" width="8" height="8" />
+                <rect x="6" y="6" width="4" height="4" fill="#1a1a2e" />
+              </svg>
+            </button>
+            {settingsOpen && (
+              <div className="mt-1 bg-[#1a1a2e]/95 border-2 border-[#3a3a5e] p-3 w-48" style={{ backdropFilter: "blur(4px)" }}>
+                <div className="mb-3">
+                  <label className="font-pixel text-[7px] text-gray-400 block mb-1">VOLUME</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={volume}
+                      onChange={(e) => { const v = Number(e.target.value); setVolume(v); setMasterVolume(v); }}
+                      className="flex-1 h-1 accent-amber-400"
+                    />
+                    <span className="font-pixel text-[7px] text-gray-300 w-6 text-right">{volume}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={onLeave}
+                  className="w-full py-1.5 bg-red-600/80 hover:bg-red-600 text-white font-pixel text-[7px] border-2 border-black transition-colors"
+                >
+                  {leaveLabel}
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Turn timer (top-right, always visible when active) */}
           {turnDeadline && (
@@ -425,40 +514,29 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                       ))}
                     </div>
 
-                    {/* Bank trade button (Fix 5: only show when valid) */}
-                    {bankInfo && !bankTradeOpen && (
-                      <button
-                        onClick={() => setBankTradeOpen(true)}
-                        className="px-2 py-1 text-[7px] pixel-btn bg-amber-600 text-white"
-                        title={`Bank trade ${bankInfo.ratio}:1`}
-                      >
-                        BANK {bankInfo.ratio}:1
-                      </button>
-                    )}
-
-                    {/* Bank trade resource picker */}
-                    {bankInfo && bankTradeOpen && (
-                      <div className="flex items-center gap-0.5">
-                        <span className="text-[6px] text-gray-400">GET:</span>
-                        {ALL_RESOURCES.filter((r) => r !== bankInfo.giving).map((res) => (
-                          <button
-                            key={res}
-                            onClick={() => handleBankTrade(bankInfo.giving, res)}
-                            className="w-6 h-6 flex items-center justify-center border border-black hover:border-amber-400 relative"
-                            style={{ backgroundColor: RESOURCE_COLORS[res] }}
-                            title={`Bank: get ${bankInfo.receivingCount} ${RESOURCE_LABELS[res]}`}
-                          >
-                            <ResourceIcon resource={res} size={12} />
-                          </button>
-                        ))}
+                    {/* Bank trade button: validates and executes immediately */}
+                    {(() => {
+                      const bankValid = bankInfo &&
+                        trade.requesting.length > 0 &&
+                        trade.requesting.length === bankInfo.receivingCount &&
+                        !trade.requesting.some((r) => r === bankInfo.giving);
+                      return bankInfo ? (
                         <button
-                          onClick={() => setBankTradeOpen(false)}
-                          className="text-[6px] text-gray-500 hover:text-white px-1"
+                          onClick={bankValid ? handleBankTradeSimple : undefined}
+                          disabled={!bankValid}
+                          className={`px-2 py-1 text-[7px] pixel-btn ${
+                            bankValid
+                              ? "bg-amber-600 text-white"
+                              : "bg-[#2a2a4e] text-gray-600 cursor-not-allowed"
+                          }`}
+                          title={bankValid
+                            ? `Bank trade ${bankInfo.ratio}:1 — click to execute`
+                            : `Select ${bankInfo.receivingCount} resource(s) to receive (${bankInfo.ratio}:1)`}
                         >
-                          X
+                          BANK {bankInfo.ratio}:1
                         </button>
-                      </div>
-                    )}
+                      ) : null;
+                    })()}
 
                     {/* Offer to players */}
                     <button
@@ -475,7 +553,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
 
                     {/* Close */}
                     <button
-                      onClick={() => { trade.closeTrade(); setBankTradeOpen(false); }}
+                      onClick={() => trade.closeTrade()}
                       className="px-1.5 py-1 text-[7px] text-gray-400 pixel-btn bg-[#2a2a4e] hover:bg-[#3a3a5e]"
                     >
                       X
@@ -513,6 +591,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
               .filter(([, count]) => count > 0)
               .map(([res, count]) => {
                 const discardCount = discardSelection[res];
+                const notifs = resourceNotifs.filter((n) => n.resource === res);
                 return (
                   <div
                     key={res}
@@ -521,12 +600,23 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                     title={needsDiscard ? `Click to discard ${RESOURCE_LABELS[res]}` : (canTradeOrBuild ? `Click to offer ${RESOURCE_LABELS[res]}` : undefined)}
                   >
                     <ResourceCard resource={res} count={count} />
-                    {/* Discard overlay (Fix 3) */}
+                    {/* Discard overlay */}
                     {needsDiscard && discardCount > 0 && (
                       <div className="absolute inset-0 bg-red-600/40 border-2 border-red-500 flex items-center justify-center">
                         <span className="font-pixel text-[10px] text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">-{discardCount}</span>
                       </div>
                     )}
+                    {/* Resource change floating badges */}
+                    {notifs.map((n) => (
+                      <span
+                        key={n.id}
+                        className={`absolute -top-1 left-1/2 -translate-x-1/2 font-pixel text-[10px] pointer-events-none drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] ${
+                          n.delta > 0 ? "text-green-400 anim-card-gain" : "text-red-400 anim-card-lose"
+                        }`}
+                      >
+                        {n.delta > 0 ? `+${n.delta}` : n.delta}
+                      </span>
+                    ))}
                   </div>
                 );
               })}

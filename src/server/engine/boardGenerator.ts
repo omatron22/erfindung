@@ -316,10 +316,10 @@ function getExpansionPortPositions(): [VertexKey, VertexKey][] {
       canonicalVertexKey({ hex: { q: -2, r: -1, s: 3 }, direction: "N" }),
       canonicalVertexKey({ hex: cubeAdd({ q: -2, r: -1, s: 3 }, CUBE_DIRECTIONS[5]), direction: "S" }),
     ],
-    // Top-left-upper
+    // Top (gap area — uses ring-2 perimeter)
     [
-      canonicalVertexKey({ hex: { q: -1, r: -2, s: 3 }, direction: "N" }),
-      canonicalVertexKey({ hex: cubeAdd({ q: -1, r: -2, s: 3 }, CUBE_DIRECTIONS[0]), direction: "S" }),
+      canonicalVertexKey({ hex: { q: 0, r: -2, s: 2 }, direction: "N" }),
+      canonicalVertexKey({ hex: cubeAdd({ q: 0, r: -2, s: 2 }, CUBE_DIRECTIONS[5]), direction: "S" }),
     ],
   ];
 

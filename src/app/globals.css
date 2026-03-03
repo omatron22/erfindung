@@ -166,3 +166,26 @@ body {
 .start-pulse {
   animation: start-pulse 1.8s ease-in-out infinite;
 }
+
+/* Resource gain/lose floating badge animations */
+@keyframes card-gain {
+  0%   { opacity: 0; transform: translateY(0); }
+  15%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+
+@keyframes card-lose {
+  0%   { opacity: 0; transform: translateY(0); }
+  15%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+
+.anim-card-gain {
+  animation: card-gain 1.2s ease-out forwards;
+}
+
+.anim-card-lose {
+  animation: card-lose 1.2s ease-out forwards;
+}

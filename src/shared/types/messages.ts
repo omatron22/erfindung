@@ -20,6 +20,7 @@ export interface ClientMessages {
   "room:start-game": {};
   "room:update-config": { config: Partial<LobbyConfig> };
   "room:update-player": { color?: string; buildingStyle?: string };
+  "room:update-bot": { playerIndex: number; name?: string; color?: string };
   "room:leave-game": {};
   "chat:message": { text: string };
 }

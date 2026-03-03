@@ -106,6 +106,10 @@ export function handleConnection(io: TypedServer, socket: TypedSocket) {
     handleUpdatePlayer(io, socket, color, buildingStyle);
   });
 
+  socket.on("room:update-bot", ({ playerIndex, name, color }) => {
+    handleUpdateBot(io, socket, playerIndex, name, color);
+  });
+
   socket.on("room:leave-game", () => {
     handleLeaveGame(io, socket);
   });
@@ -373,6 +377,35 @@ function handleUpdatePlayer(
   if (buildingStyle !== undefined) {
     if (!(BUILDING_STYLES as readonly string[]).includes(buildingStyle)) return;
     slot.buildingStyle = buildingStyle as import("@/shared/types/config").BuildingStyle;
+  }
+
+  broadcastLobbyState(io, room);
+}
+
+function handleUpdateBot(
+  io: TypedServer,
+  socket: TypedSocket,
+  playerIndex: number,
+  name?: string,
+  color?: string,
+) {
+  const room = getRoomForSocket(socket.id);
+  if (!room || room.hostSocketId !== socket.id) return;
+  if (room.gameState) return;
+
+  const slot = room.players[playerIndex];
+  if (!slot || !slot.isBot) return;
+
+  if (name !== undefined) {
+    const trimmed = name.trim().slice(0, 20);
+    if (trimmed) slot.name = trimmed;
+  }
+
+  if (color !== undefined) {
+    if (!(PLAYER_COLORS as readonly string[]).includes(color)) return;
+    const other = room.players.find((p) => p !== slot && p.color === color);
+    if (other) other.color = slot.color;
+    slot.color = color;
   }
 
   broadcastLobbyState(io, room);

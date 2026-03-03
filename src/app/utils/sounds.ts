@@ -1,5 +1,18 @@
 let audioCtx: AudioContext | null = null;
 
+// --- Master volume (0-100, persisted) ---
+let _masterVolume = 80;
+try {
+  const stored = typeof localStorage !== "undefined" ? localStorage.getItem("catan-volume") : null;
+  if (stored !== null) _masterVolume = Math.max(0, Math.min(100, Number(stored)));
+} catch {}
+
+export function getMasterVolume(): number { return _masterVolume; }
+export function setMasterVolume(v: number) {
+  _masterVolume = Math.max(0, Math.min(100, v));
+  try { localStorage.setItem("catan-volume", String(_masterVolume)); } catch {}
+}
+
 function getContext(): AudioContext {
   if (!audioCtx) {
     audioCtx = new AudioContext();
@@ -12,13 +25,15 @@ function getContext(): AudioContext {
 
 /** Helper: play a square wave note (classic 8-bit sound) */
 function playSquareNote(freq: number, startTime: number, duration: number, volume = 0.08) {
+  if (_masterVolume === 0) return;
   const ctx = getContext();
+  const vol = volume * (_masterVolume / 100);
   const osc = ctx.createOscillator();
   osc.type = "square";
   osc.frequency.setValueAtTime(freq, startTime);
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(volume, startTime);
+  gain.gain.setValueAtTime(vol, startTime);
   gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
   osc.connect(gain).connect(ctx.destination);
@@ -67,15 +82,17 @@ export function playTurnNotification() {
 
 /** Robber move — ominous low descending tone */
 export function playRobber() {
+  if (_masterVolume === 0) return;
   const ctx = getContext();
   const t = ctx.currentTime;
+  const vol = 0.1 * (_masterVolume / 100);
   const osc = ctx.createOscillator();
   osc.type = "square";
   osc.frequency.setValueAtTime(300, t);
   osc.frequency.exponentialRampToValueAtTime(100, t + 0.3);
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.1, t);
+  gain.gain.setValueAtTime(vol, t);
   gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
 
   osc.connect(gain).connect(ctx.destination);

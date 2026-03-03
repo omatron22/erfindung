@@ -76,6 +76,7 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [colorPickerOpen, setColorPickerOpen] = useState<number | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState<number | null>(null);
+  const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
   const [buildingStyles, setBuildingStyles] = useState<Record<number, BuildingStyle>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
@@ -410,17 +411,27 @@ export default function Home() {
                       </span>
                     </button>
 
-                    {/* Name */}
-                    <input
-                      type="text"
-                      value={player.name}
-                      onChange={(e) => updatePlayer(idx, { name: e.target.value })}
-                      placeholder={idx === 0 ? "Your name..." : "Bot name..."}
-                      className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
-                      autoFocus={idx === 0}
-                    />
-                    {player.isBot && (
-                      <span className="font-pixel text-[6px] text-gray-500 shrink-0">(BOT)</span>
+                    {/* Name — click to edit */}
+                    {editingNameIdx === idx ? (
+                      <input
+                        type="text"
+                        value={player.name}
+                        onChange={(e) => updatePlayer(idx, { name: e.target.value })}
+                        onBlur={() => setEditingNameIdx(null)}
+                        onKeyDown={(e) => { if (e.key === "Enter") setEditingNameIdx(null); }}
+                        placeholder={idx === 0 ? "Your name..." : "Bot name..."}
+                        className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
+                        autoFocus
+                      />
+                    ) : (
+                      <span
+                        className="flex-1 font-pixel text-[8px] text-gray-800 truncate cursor-pointer hover:text-amber-700"
+                        onClick={() => setEditingNameIdx(idx)}
+                        title="Click to edit name"
+                      >
+                        {player.name || (idx === 0 ? "Your name..." : "Bot name...")}
+                        {player.isBot && <span className="text-gray-500 text-[6px] ml-1">(BOT)</span>}
+                      </span>
                     )}
 
                     {/* Building style */}
@@ -633,6 +644,12 @@ export default function Home() {
             className="w-full py-4 bg-amber-400 text-gray-900 font-pixel text-[12px] pixel-btn"
           >
             START GAME
+          </button>
+          <button
+            onClick={() => setShowLobby(false)}
+            className="w-full py-2 font-pixel text-[8px] text-gray-500 hover:text-gray-700"
+          >
+            BACK
           </button>
         </div>
 
