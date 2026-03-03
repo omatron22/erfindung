@@ -282,7 +282,14 @@ export default function Home() {
         {cloudLayer}
 
         <div className="relative z-10 w-80">
-          <div className="bg-[#f0e6d0] pixel-border p-6">
+          <div className="bg-[#f0e6d0] pixel-border p-6 relative">
+            <button
+              onClick={() => { setShowOnlineLobby(false); mpStore.setError(null); }}
+              className="absolute top-2 left-2 font-pixel text-[8px] text-gray-500 hover:text-gray-800"
+              title="Back to menu"
+            >
+              &larr; BACK
+            </button>
             <h2
               className="font-pixel text-[16px] text-amber-400 mb-4 text-center"
               style={{ textShadow: "2px 2px 0 #000" }}
@@ -344,12 +351,6 @@ export default function Home() {
               </button>
             </div>
 
-            <button
-              onClick={() => { setShowOnlineLobby(false); mpStore.setError(null); }}
-              className="w-full mt-4 py-2 font-pixel text-[8px] text-gray-500 hover:text-gray-700"
-            >
-              BACK
-            </button>
           </div>
         </div>
       </main>
@@ -369,6 +370,14 @@ export default function Home() {
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#2a6ab5] overflow-hidden relative">
       {cloudLayer}
+
+      <button
+        onClick={() => setShowLobby(false)}
+        className="absolute top-4 left-4 z-20 font-pixel text-[9px] text-white/70 hover:text-white"
+        title="Back to menu"
+      >
+        &larr; BACK
+      </button>
 
       <div className="relative z-10 w-full max-w-5xl px-4">
         {/* Header */}
@@ -644,12 +653,6 @@ export default function Home() {
             className="w-full py-4 bg-amber-400 text-gray-900 font-pixel text-[12px] pixel-btn"
           >
             START GAME
-          </button>
-          <button
-            onClick={() => setShowLobby(false)}
-            className="w-full py-2 font-pixel text-[8px] text-gray-500 hover:text-gray-700"
-          >
-            BACK
           </button>
         </div>
 

@@ -209,6 +209,14 @@ export default function OnlineGamePage() {
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#2a6ab5] overflow-hidden relative">
+        <button
+          onClick={handleLeaveGame}
+          className="absolute top-4 left-4 z-20 font-pixel text-[9px] text-white/70 hover:text-white"
+          title="Leave room"
+        >
+          &larr; LEAVE
+        </button>
+
         <div className="relative z-10 w-full max-w-5xl px-4">
           {/* Header + Room Code Banner */}
           <div className="text-center mb-3">
@@ -384,9 +392,6 @@ export default function OnlineGamePage() {
               ) : (
                 <div className="w-full py-4 text-center"><p className="font-pixel text-[10px] text-white/70 animate-pulse">WAITING FOR HOST TO START...</p></div>
               )}
-              <button onClick={handleLeaveGame} className="w-full py-2 font-pixel text-[8px] text-gray-400 hover:text-white">
-                LEAVE ROOM
-              </button>
               {!connected && <p className="font-pixel text-[7px] text-red-400 text-center animate-pulse">DISCONNECTED — RECONNECTING...</p>}
             </div>
 

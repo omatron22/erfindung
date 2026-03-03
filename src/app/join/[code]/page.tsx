@@ -69,7 +69,14 @@ export default function JoinPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#2a6ab5]">
-      <div className="bg-[#f0e6d0] pixel-border p-8 w-80 text-center">
+      <div className="bg-[#f0e6d0] pixel-border p-8 w-80 text-center relative">
+        <button
+          onClick={() => router.push("/")}
+          className="absolute top-2 left-2 font-pixel text-[8px] text-gray-500 hover:text-gray-800"
+          title="Back to menu"
+        >
+          &larr; BACK
+        </button>
         <h1
           className="font-pixel text-[20px] text-amber-400 mb-2"
           style={{ textShadow: "2px 2px 0 #000" }}
@@ -107,12 +114,6 @@ export default function JoinPage() {
           className="w-full py-3 bg-amber-400 text-gray-900 font-pixel text-[11px] pixel-btn disabled:opacity-50"
         >
           {joining ? "JOINING..." : "JOIN GAME"}
-        </button>
-        <button
-          onClick={() => router.push("/")}
-          className="w-full mt-3 py-2 font-pixel text-[8px] text-gray-500 hover:text-gray-700"
-        >
-          BACK
         </button>
       </div>
     </main>
