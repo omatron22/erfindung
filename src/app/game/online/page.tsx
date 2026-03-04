@@ -107,8 +107,15 @@ export default function OnlineGamePage() {
     };
   }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Redirect if no room
-  useEffect(() => { if (!roomCode) router.push("/"); }, [roomCode, router]);
+  // Redirect if no room (delay to let zustand propagate on initial mount)
+  const hasEverHadRoom = useRef(!!roomCode);
+  useEffect(() => {
+    if (roomCode) { hasEverHadRoom.current = true; return; }
+    if (hasEverHadRoom.current) { router.push("/"); return; }
+    // First mount with no roomCode — wait a tick for store to propagate
+    const t = setTimeout(() => { if (!mpStore.roomCode) router.push("/"); }, 100);
+    return () => clearTimeout(t);
+  }, [roomCode, router, mpStore]);
 
   // Reconnect on page load
   useEffect(() => {
