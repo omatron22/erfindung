@@ -399,7 +399,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   const myNewDevCards: DevelopmentCardType[] = myPlayer.newDevelopmentCards ?? [];
 
   return (
-    <div className="h-safe-screen flex overflow-hidden bg-[#6b5840] overscroll-none">
+    <div className="fixed inset-0 flex overflow-hidden bg-[#6b5840]">
       {/* Left column: board + trade strips + bottom bar */}
       <div className="flex-1 flex flex-col min-w-0 relative" style={{ backgroundColor: "#6b5840" }}>
         {/* Board */}
