@@ -238,6 +238,48 @@ export function playCollect() {
   playSquareNote(784, t + 0.1, 0.15, 0.04);
 }
 
+/** Sheep nuke explosion — dramatic 8-bit boom with rumble */
+export function playExplosion() {
+  if (_masterVolume === 0 || _sfxMuted) return;
+  const ctx = getContext();
+  const t = safeNow(ctx);
+  const vol = 0.14 * (_masterVolume / 100);
+
+  // Low rumble noise burst
+  const bufLen = ctx.sampleRate * 0.6;
+  const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) {
+    data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 2);
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = buf;
+
+  // Low-pass for rumble feel
+  const lp = ctx.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(400, t);
+  lp.frequency.exponentialRampToValueAtTime(60, t + 0.5);
+
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(vol, t);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+  noiseGain.gain.setValueAtTime(0, t + 0.551);
+
+  noise.connect(lp).connect(noiseGain).connect(ctx.destination);
+  noise.start(t);
+  noise.stop(t + 0.6);
+
+  // Impact hit — sharp square wave burst
+  playSquareNote(80, t, 0.15, 0.15);
+  playSquareNote(60, t + 0.05, 0.2, 0.12);
+
+  // Debris — rapid descending crackles
+  for (let i = 0; i < 5; i++) {
+    playSquareNote(300 - i * 40, t + 0.15 + i * 0.06, 0.04, 0.06);
+  }
+}
+
 /** Button click — tiny tick */
 export function playClick() {
   const ctx = getContext();

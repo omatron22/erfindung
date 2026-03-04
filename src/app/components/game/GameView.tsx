@@ -54,6 +54,8 @@ export interface GameViewProps {
   // Visual effects (managed by parent)
   flashingHexes: Set<HexKey>;
   flashSeven: boolean;
+  nukeFlashHexes?: Set<HexKey>;
+  screenShake?: boolean;
   turnDeadline?: number | null;
 
   // Status indicators
@@ -97,6 +99,8 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     onRestart,
     flashingHexes,
     flashSeven,
+    nukeFlashHexes,
+    screenShake,
     turnDeadline,
     error,
     botThinking,
@@ -404,7 +408,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   const myNewDevCards: DevelopmentCardType[] = myPlayer.newDevelopmentCards ?? [];
 
   return (
-    <div className="fixed inset-0 flex overflow-hidden bg-[#6b5840]">
+    <div className={`fixed inset-0 flex overflow-hidden bg-[#6b5840] ${screenShake ? "screen-shake" : ""}`}>
       {/* Left column: board + trade strips + bottom bar */}
       <div className="flex-1 flex flex-col min-w-0 relative" style={{ backgroundColor: "#6b5840" }}>
         {/* Board */}
@@ -417,6 +421,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
             highlightedHexes={highlightedHexes}
             flashingHexes={flashingHexes}
             flashSeven={flashSeven}
+            nukeFlashHexes={nukeFlashHexes}
             playerColors={playerColors}
             buildingStyles={buildingStyles}
             onVertexClick={isMyTurn ? handleVertexClick : undefined}

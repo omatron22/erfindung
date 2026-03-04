@@ -12,7 +12,7 @@ import {
   playDiceRoll, playBuild, playTrade, playTurnNotification,
   playRobber, playSteal, playEndTurn, playDevCard, playError,
   playChat, playSetup, playWin, playCollect, playClick, playAchievement,
-  stopMusic,
+  playExplosion, stopMusic,
 } from "@/app/utils/sounds";
 import type { Announcement } from "@/app/components/ui/AnnouncementOverlay";
 import type { GameAction, GameEvent } from "@/shared/types/actions";
@@ -62,6 +62,8 @@ export default function GamePage() {
 
   const [flashSeven, setFlashSeven] = useState(false);
   const [flashingHexes, setFlashingHexes] = useState<Set<HexKey>>(new Set());
+  const [nukeFlashHexes, setNukeFlashHexes] = useState<Set<HexKey>>(new Set());
+  const [screenShake, setScreenShake] = useState(false);
   const [pendingTradeUI, setPendingTradeUI] = useState<PendingTradeUI | null>(null);
   const [botTradeUI, setBotTradeUI] = useState<BotTradeUI | null>(null);
   const [turnDeadline, setTurnDeadline] = useState<number | null>(null);
@@ -159,6 +161,28 @@ export default function GamePage() {
     }
   }
 
+  function triggerNukeEffects(events: GameEvent[], state: GameState) {
+    const nukeEvent = events.find(e => e.type === "sheep-nuke-destroyed");
+    if (!nukeEvent) return;
+    const number = nukeEvent.data?.number;
+    if (!number) return;
+
+    // Find hexes with that number and flash them red
+    const nukedHexes = new Set<HexKey>();
+    for (const [key, hex] of Object.entries(state.board.hexes)) {
+      if (hex.number === number) nukedHexes.add(key);
+    }
+    if (nukedHexes.size > 0) {
+      setNukeFlashHexes(nukedHexes);
+      setTimeout(() => setNukeFlashHexes(new Set()), 1600);
+    }
+
+    // Screen shake + explosion sound
+    playExplosion();
+    setScreenShake(true);
+    setTimeout(() => setScreenShake(false), 500);
+  }
+
   function playActionSound(actionType: string, isBot = false) {
     switch (actionType) {
       case "roll-dice": if (isBot) playDiceRoll(); break;
@@ -171,8 +195,9 @@ export default function GamePage() {
       case "buy-development-card": playDevCard(); break;
       case "play-knight": playRobber(); break;
       case "play-road-building": case "play-year-of-plenty": case "play-monopoly": playDevCard(); break;
-      // Silent actions — no sound needed
-      case "discard-resources": case "sheep-nuke-pick": case "accept-trade":
+      // Silent actions — no sound needed (nuke effects handled by triggerNukeEffects)
+      case "sheep-nuke": case "sheep-nuke-pick":
+      case "discard-resources": case "accept-trade":
       case "reject-trade": case "cancel-trade": case "select-monopoly-resource":
       case "select-year-of-plenty-resources": break;
       default: playClick(); break;
@@ -219,6 +244,10 @@ export default function GamePage() {
             setTimeout(() => setFlashingHexes(new Set()), 1500);
           }
         }
+      }
+      // Nuke effects for bot sheep-nuke
+      if ((action.type === "sheep-nuke" || action.type === "sheep-nuke-pick") ) {
+        triggerNukeEffects(result.events ?? [], result.newState);
       }
       setGameState(result.newState);
     } else {
@@ -646,6 +675,11 @@ export default function GamePage() {
       }
     }
 
+    // Trigger nuke effects for sheep-nuke or sheep-nuke-pick
+    if ((action.type === "sheep-nuke" || action.type === "sheep-nuke-pick") && result.valid && result.newState) {
+      triggerNukeEffects(result.events ?? [], result.newState);
+    }
+
     playActionSound(action.type);
   }, [dispatch, clearError, gameState, botIndices]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -867,6 +901,8 @@ export default function GamePage() {
         }}
         flashingHexes={flashingHexes}
         flashSeven={flashSeven}
+        nukeFlashHexes={nukeFlashHexes}
+        screenShake={screenShake}
         turnDeadline={turnDeadline}
         error={error}
         botThinking={botThinking}

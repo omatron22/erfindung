@@ -10,7 +10,7 @@ import VictoryOverlay from "@/app/components/ui/VictoryOverlay";
 import {
   playDiceRoll, playBuild, playTrade, playTurnNotification,
   playRobber, playSteal, playEndTurn, playDevCard, playError,
-  playChat, playWin, playCollect, playAchievement,
+  playChat, playWin, playCollect, playAchievement, playExplosion,
   startMusic, stopMusic,
 } from "@/app/utils/sounds";
 import type { Announcement } from "@/app/components/ui/AnnouncementOverlay";
@@ -47,6 +47,8 @@ export default function OnlineGamePage() {
   // Visual state
   const [flashSeven, setFlashSeven] = useState(false);
   const [flashingHexes, setFlashingHexes] = useState<Set<HexKey>>(new Set());
+  const [nukeFlashHexes, setNukeFlashHexes] = useState<Set<HexKey>>(new Set());
+  const [screenShake, setScreenShake] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
 
@@ -192,6 +194,23 @@ export default function OnlineGamePage() {
         case "development-card-bought": case "knight-played": case "road-building-played":
         case "year-of-plenty-played": case "monopoly-played": playDevCard(); break;
         case "resources-distributed": playCollect(); break;
+        case "sheep-nuke-destroyed": {
+          const number = event.data?.number;
+          if (number && gameState) {
+            const nuked = new Set<HexKey>();
+            for (const [key, hex] of Object.entries(gameState.board.hexes)) {
+              if (hex.number === number) nuked.add(key);
+            }
+            if (nuked.size > 0) {
+              setNukeFlashHexes(nuked);
+              setTimeout(() => setNukeFlashHexes(new Set()), 1600);
+            }
+          }
+          playExplosion();
+          setScreenShake(true);
+          setTimeout(() => setScreenShake(false), 500);
+          break;
+        }
         case "largest-army-changed": case "longest-road-changed": {
           if (event.playerIndex !== null) {
             const p = gameState.players[event.playerIndex];
@@ -543,6 +562,8 @@ export default function OnlineGamePage() {
         onLobby={handleLeaveGame}
         flashingHexes={flashingHexes}
         flashSeven={flashSeven}
+        nukeFlashHexes={nukeFlashHexes}
+        screenShake={screenShake}
         turnDeadline={gameState.turnDeadline}
         error={localError || error}
         connected={connected}

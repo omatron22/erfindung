@@ -13,9 +13,10 @@ interface Props {
   highlighted?: boolean;
   flashing?: boolean;
   flashSeven?: boolean;
+  nukeFlash?: boolean;
 }
 
-export default function HexTile({ hex, size, onClick, highlighted, flashing, flashSeven }: Props) {
+export default function HexTile({ hex, size, onClick, highlighted, flashing, flashSeven, nukeFlash }: Props) {
   const center = hexToPixel(hex.coord, size);
   const corners = hexCornerPixels(hex.coord, size);
   const points = corners.map((c) => `${c.x},${c.y}`).join(" ");
@@ -49,7 +50,7 @@ export default function HexTile({ hex, size, onClick, highlighted, flashing, fla
         fill={fillColor}
         stroke={highlighted ? "#fff" : "#000"}
         strokeWidth={highlighted ? 3 : 2}
-        className={flashing ? "hex-flash-resource" : flashSeven ? "hex-flash-seven" : ""}
+        className={nukeFlash ? "hex-flash-nuke" : flashing ? "hex-flash-resource" : flashSeven ? "hex-flash-seven" : ""}
       />
 
       {/* Terrain illustration */}
