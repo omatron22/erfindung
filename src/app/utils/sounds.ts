@@ -45,7 +45,13 @@ export function setMusicMuted(m: boolean) {
 }
 
 export function startMusic() {
-  if (_bgMusic) return; // already playing
+  if (_bgMusic) {
+    // Audio element exists but may not be playing (autoplay blocked) — retry
+    if (_bgMusic.paused && !_musicMuted) {
+      _bgMusic.play().catch(() => {});
+    }
+    return;
+  }
   const audio = new Audio("/music/gabemar.m4a");
   audio.loop = true;
   audio.volume = _musicVolume * (_masterVolume / 100);

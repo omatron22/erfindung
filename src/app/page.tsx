@@ -35,27 +35,27 @@ function PixelCloud({ size = 80, color = "white" }: { size?: number; color?: str
   );
 }
 
-/** Simplified pixel-art sheep cloud — cloud shape with subtle head bump and small legs */
+/** Simplified pixel-art sheep cloud — cloud shape with a head bump on the right and small legs */
 function PixelSheepCloud({ size = 80, color = "white" }: { size?: number; color?: string }) {
   const s = size / 80;
   return (
-    <svg width={80 * s} height={44 * s} viewBox="0 0 80 44" shapeRendering="crispEdges">
+    <svg width={80 * s} height={40 * s} viewBox="0 0 80 40" shapeRendering="crispEdges">
       {/* Cloud body */}
-      <rect x="20" y="0"  width="16" height="4" fill={color} />
-      <rect x="8"  y="4"  width="56" height="4" fill={color} />
-      <rect x="4"  y="8"  width="68" height="4" fill={color} />
-      <rect x="4"  y="12" width="72" height="4" fill={color} />
-      <rect x="8"  y="16" width="68" height="4" fill={color} />
-      <rect x="12" y="20" width="56" height="4" fill={color} />
-      <rect x="16" y="24" width="48" height="4" fill={color} />
-      {/* Head bump */}
-      <rect x="64" y="4"  width="12" height="4" fill={color} />
-      <rect x="68" y="0"  width="8"  height="4" fill={color} />
+      <rect x="20" y="4"  width="16" height="4" fill={color} />
+      <rect x="8"  y="8"  width="52" height="4" fill={color} />
+      <rect x="4"  y="12" width="60" height="4" fill={color} />
+      <rect x="4"  y="16" width="64" height="4" fill={color} />
+      <rect x="8"  y="20" width="56" height="4" fill={color} />
+      <rect x="16" y="24" width="44" height="4" fill={color} />
+      {/* Head — single rounded bump on right */}
+      <rect x="60" y="8"  width="12" height="4" fill={color} />
+      <rect x="64" y="4"  width="8"  height="4" fill={color} />
+      <rect x="64" y="12" width="12" height="8" fill={color} />
       {/* Legs */}
       <rect x="20" y="28" width="4" height="8" fill={color} />
       <rect x="32" y="28" width="4" height="8" fill={color} />
-      <rect x="48" y="28" width="4" height="8" fill={color} />
-      <rect x="60" y="28" width="4" height="8" fill={color} />
+      <rect x="44" y="28" width="4" height="8" fill={color} />
+      <rect x="56" y="28" width="4" height="8" fill={color} />
     </svg>
   );
 }
