@@ -159,9 +159,9 @@ export default function GamePage() {
     }
   }
 
-  function playActionSound(actionType: string) {
+  function playActionSound(actionType: string, isBot = false) {
     switch (actionType) {
-      case "roll-dice": break; // Handled by DiceDisplay.onAnimationStart
+      case "roll-dice": if (isBot) playDiceRoll(); break;
       case "build-road": case "build-settlement": case "build-city": playBuild(); break;
       case "place-settlement": case "place-road": playSetup(); break;
       case "bank-trade": case "offer-trade": playTrade(); break;
@@ -201,7 +201,7 @@ export default function GamePage() {
 
     const result = applyAction(state, action);
     if (result.valid && result.newState) {
-      playActionSound(action.type);
+      playActionSound(action.type, true);
       checkAchievementEvents(result.events, result.newState);
       // Flash hexes for bot dice rolls (same logic as human handleAction)
       if (action.type === "roll-dice" && result.newState.lastDiceRoll) {
@@ -406,7 +406,7 @@ export default function GamePage() {
         if (action) {
           const result = applyAction(state, action);
           if (result.valid && result.newState) {
-            playActionSound(action.type);
+            playActionSound(action.type, true);
             setGameState(result.newState);
           }
         }
@@ -449,7 +449,7 @@ export default function GamePage() {
         if (action) {
           const result = applyAction(state, action);
           if (result.valid && result.newState) {
-            playActionSound(action.type);
+            playActionSound(action.type, true);
             // Flash hexes if auto-roll
             if (action.type === "roll-dice" && result.newState.lastDiceRoll) {
               const total = result.newState.lastDiceRoll.die1 + result.newState.lastDiceRoll.die2;

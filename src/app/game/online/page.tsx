@@ -183,7 +183,7 @@ export default function OnlineGamePage() {
     if (!lastEvents || lastEvents.length === 0 || !gameState) return;
     for (const event of lastEvents) {
       switch (event.type) {
-        case "dice-rolled": break; // Sound handled by DiceDisplay.onAnimationStart
+        case "dice-rolled": playDiceRoll(); break;
         case "settlement-built": case "city-built": case "road-built": playBuild(); break;
         case "trade-completed": playTrade(); break;
         case "robber-moved": playRobber(); break;

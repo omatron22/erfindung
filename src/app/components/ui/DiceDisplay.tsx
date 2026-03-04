@@ -42,43 +42,15 @@ function DieFace({ value, shaking }: { value: number; shaking?: boolean }) {
 export default function DiceDisplay({ roll, canRoll, onRoll, onAnimationStart }: Props) {
   const [isRolling, setIsRolling] = useState(false);
   const [rollingValues, setRollingValues] = useState<[number, number]>([1, 1]);
-  const [showResult, setShowResult] = useState<DiceRoll | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const resultTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const prevRollRef = useRef<DiceRoll | null>(null);
 
   useEffect(() => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (resultTimeoutRef.current) clearTimeout(resultTimeoutRef.current);
     };
   }, []);
-
-  // Detect when roll prop changes (bot rolls) — trigger animation
-  useEffect(() => {
-    if (!roll || isRolling) return;
-    if (prevRollRef.current === roll) return;
-    const wasNull = prevRollRef.current === null;
-    prevRollRef.current = roll;
-    // If roll changed from a previous value (bot rolled), show animation
-    if (!wasNull) {
-      setIsRolling(true);
-      onAnimationStart?.();
-      intervalRef.current = setInterval(() => {
-        setRollingValues([randomDie(), randomDie()]);
-      }, 80);
-      timeoutRef.current = setTimeout(() => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        intervalRef.current = null;
-        setIsRolling(false);
-        setShowResult(roll);
-      }, ROLL_ANIMATION_MS);
-    } else {
-      setShowResult(roll);
-    }
-  }, [roll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClick = useCallback(() => {
     if (!canRoll || isRolling) return;
@@ -111,11 +83,11 @@ export default function DiceDisplay({ roll, canRoll, onRoll, onAnimationStart }:
   }
 
   // Show result
-  if (showResult) {
+  if (roll) {
     return (
       <div className="flex items-center gap-1.5">
-        <DieFace value={showResult.die1} />
-        <DieFace value={showResult.die2} />
+        <DieFace value={roll.die1} />
+        <DieFace value={roll.die2} />
       </div>
     );
   }
