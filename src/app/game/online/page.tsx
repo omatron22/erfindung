@@ -419,7 +419,7 @@ export default function OnlineGamePage() {
                   <RuleCard label="FRIENDLY ROBBER" active={lobbyConfig?.friendlyRobber ?? false} onClick={isHost ? () => handleUpdateConfig({ friendlyRobber: !(lobbyConfig?.friendlyRobber) }) : undefined} icon="robber" disabled={!isHost} tooltip="The robber can't target players with 2 or fewer victory points" />
                   <RuleCard label="BALANCED DICE" active={lobbyConfig?.fairDice ?? false} onClick={isHost ? () => handleUpdateConfig({ fairDice: !(lobbyConfig?.fairDice) }) : undefined} icon="dice" disabled={!isHost} tooltip="Dice rolls follow a balanced distribution instead of pure random — each number appears roughly as often as expected" />
                   <RuleCard label="DOUBLES ROLL AGAIN" active={lobbyConfig?.doublesRollAgain ?? false} onClick={isHost ? () => handleUpdateConfig({ doublesRollAgain: !(lobbyConfig?.doublesRollAgain) }) : undefined} icon="doubles" disabled={!isHost} tooltip="Rolling doubles lets you take another turn after ending the current one" />
-                  <RuleCard label="SHEEP NUKE" active={lobbyConfig?.sheepNuke ?? false} onClick={isHost ? () => handleUpdateConfig({ sheepNuke: !(lobbyConfig?.sheepNuke) }) : undefined} icon="nuke" disabled={!isHost} tooltip="Spend 8 wool to roll dice and steal all resources of that number from every player" />
+                  <RuleCard label="SHEEP NUKE" active={lobbyConfig?.sheepNuke ?? false} onClick={isHost ? () => handleUpdateConfig({ sheepNuke: !(lobbyConfig?.sheepNuke) }) : undefined} icon="nuke" disabled={!isHost} tooltip="Spend 10 wool to roll dice and destroy all buildings & roads on hexes with that number. Roll a 7 to pick the number!" />
                 </div>
               </div>
 
