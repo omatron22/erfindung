@@ -85,7 +85,10 @@ export default function OnlineGamePage() {
     const onJoined = ({ roomCode: code, playerIndex: idx, reconnectToken: token }: { roomCode: string; playerIndex: number; reconnectToken: string }) => mpStore.setRoomJoined(code, idx, token);
     const onState = ({ state }: { state: ClientGameState }) => mpStore.setGameState(state);
     const onEvents = ({ events }: { events: import("@/shared/types/actions").GameEvent[] }) => mpStore.setEvents(events);
-    const onError = ({ message }: { message: string }) => { setLocalError(message); setTimeout(() => setLocalError(null), 3000); };
+    const onError = ({ message }: { message: string }) => {
+      if (message === "Room not found") { mpStore.reset(); router.push("/"); return; }
+      setLocalError(message); setTimeout(() => setLocalError(null), 3000);
+    };
     const onLobby = (data: { players: LobbyPlayer[]; config: LobbyConfig; hostIndex: number }) => mpStore.setLobbyState(data);
     const onChat = (msg: { playerIndex: number; playerName: string; text: string; timestamp: number }) => { mpStore.addChatMessage(msg); playChat(); };
     const onSessionEnded = () => { mpStore.reset(); router.push("/"); };
@@ -119,11 +122,15 @@ export default function OnlineGamePage() {
     return () => clearTimeout(t);
   }, [roomCode, router, mpStore]);
 
-  // Reconnect on page load
+  // Reconnect after socket disconnect/reconnect (not on initial navigation from home page)
+  const didMount = useRef(false);
   useEffect(() => {
-    if (!socket || !connected || gameState || !roomCode) return;
-    if (reconnectToken) socket.emit("room:join", { roomCode, playerName: "", reconnectToken });
-  }, [socket, connected, roomCode, reconnectToken]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!socket || !connected || gameState || !roomCode || !reconnectToken) return;
+    // Skip on first mount — we just navigated here from home page, socket is already in the room
+    if (!didMount.current) { didMount.current = true; return; }
+    // Socket reconnected (got a new ID) — rejoin the room
+    socket.emit("room:join", { roomCode, playerName: "", reconnectToken });
+  }, [socket, connected, roomCode, reconnectToken, gameState]);
 
   // --- Sound effects ---
   const prevPlayerRef = useRef<number | null>(null);
