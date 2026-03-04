@@ -32,9 +32,23 @@ export function pickRobberHex(state: GameState, playerIndex: number, context?: B
   const leader = context?.isEndgame && context.playerThreats.length > 0
     ? context.playerThreats[0] : null;
 
+  // Pre-compute friendly robber exclusion: skip hexes where all buildings belong to players with ≤2 VP
+  const friendlyRobber = !!state.config?.friendlyRobber;
+
   for (const [hk, hex] of Object.entries(state.board.hexes)) {
     if (hk === state.board.robberHex) continue;
     if (hex.terrain === "desert") continue;
+
+    // Friendly robber: skip hexes that only affect low-VP players
+    if (friendlyRobber) {
+      const verts = hexVertices(hex.coord);
+      const allLowVP = verts.every((vk) => {
+        const b = state.board.vertices[vk];
+        if (!b || b.playerIndex === playerIndex) return true;
+        return state.players[b.playerIndex].victoryPoints <= 2;
+      });
+      if (allLowVP) continue;
+    }
 
     const dots = hex.number ? (NUMBER_DOTS[hex.number] || 0) : 0;
     let score = 0;
@@ -186,6 +200,11 @@ export function pickDiscardResources(
       resourceValue.wool = 4;
       resourceValue.ore = 5;
       resourceValue.grain = 3;
+    }
+
+    // Sheep nuke awareness: protect wool stockpile if nuke is enabled and we're accumulating
+    if (state.config?.sheepNuke && player.resources.wool >= 6) {
+      resourceValue.wool = Math.max(resourceValue.wool, 5);
     }
 
     // Build goal protection: boost value of resources needed for goal

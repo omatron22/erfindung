@@ -234,6 +234,44 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
     }
   }
 
+  // Sheep nuke — consider when enabled and bot has enough wool
+  if (state.config?.sheepNuke && player.resources.wool >= 10) {
+    // Pre-compute expected damage to decide if nuke is worth it
+    let bestNukeScore = -Infinity;
+    for (const num of [2, 3, 4, 5, 6, 8, 9, 10, 11, 12]) {
+      let oppDmg = 0, selfDmg = 0;
+      for (const [hk, hex] of Object.entries(state.board.hexes)) {
+        if (hex.number !== num) continue;
+        const parsedHex = parseHexKey(hk);
+        for (const vk of hexVertices(parsedHex)) {
+          const b = state.board.vertices[vk];
+          if (!b) continue;
+          const val = b.type === "city" ? 2 : 1;
+          if (b.playerIndex === botIndex) selfDmg += val;
+          else oppDmg += val;
+        }
+      }
+      const s = oppDmg - selfDmg * 1.5;
+      if (s > bestNukeScore) bestNukeScore = s;
+    }
+    // Only nuke if expected net damage is significant (at least 1 building worth)
+    // and the bot has surplus wool (spending 10 wool is a big cost)
+    if (bestNukeScore >= 1) {
+      // Aggressive personalities are more trigger-happy with nukes
+      const aggressionMult = w.robberAggression ?? 1.0;
+      let score = bestNukeScore * 20 * aggressionMult;
+      // Devalue if bot is behind (save resources for building)
+      if (context.ownVP < context.vpToWin - 3) score *= 0.6;
+      // Boost in endgame when disruption matters more
+      if (context.isEndgame) score += 15;
+      options.push({
+        name: "sheepNuke",
+        score,
+        execute: () => ({ type: "sheep-nuke", playerIndex: botIndex }),
+      });
+    }
+  }
+
   // Sort by score descending and try each
   options.sort((a, b) => b.score - a.score);
   for (const option of options) {

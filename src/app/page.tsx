@@ -16,7 +16,14 @@ import CloudLayer from "@/app/components/ui/CloudLayer";
 import { loadPreferences } from "@/app/utils/preferences";
 
 const ALL_COLORS = PLAYER_COLORS;
-const BOT_NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve"];
+const BOT_DEFAULTS: { name: string; color: string; style: BuildingStyle }[] = [
+  { name: "Chungus", color: "blue",   style: "medieval" },
+  { name: "Lebron",  color: "orange", style: "modern" },
+  { name: "Luffy",   color: "green",  style: "eastern" },
+  { name: "Keyan",   color: "purple", style: "nordic" },
+  { name: "Logan",   color: "teal",   style: "colonial" },
+];
+const BOT_NAMES = BOT_DEFAULTS.map((b) => b.name);
 
 function defaultPlayer(name: string, color: string, isBot: boolean): PlayerConfig {
   return { name, color, isBot };
@@ -41,9 +48,9 @@ export default function Home() {
   const mpStore = useMultiplayerStore();
   const [players, setPlayers] = useState<PlayerConfig[]>([
     defaultPlayer("", "red", false),
-    defaultPlayer("Alice", "blue", true),
-    defaultPlayer("Bob", "white", true),
-    defaultPlayer("Carol", "orange", true),
+    defaultPlayer(BOT_DEFAULTS[0].name, BOT_DEFAULTS[0].color, true),
+    defaultPlayer(BOT_DEFAULTS[1].name, BOT_DEFAULTS[1].color, true),
+    defaultPlayer(BOT_DEFAULTS[2].name, BOT_DEFAULTS[2].color, true),
   ]);
   const [fairDice, setFairDice] = useState(false);
   const [friendlyRobber, setFriendlyRobber] = useState(false);
@@ -56,7 +63,11 @@ export default function Home() {
   const [colorPickerOpen, setColorPickerOpen] = useState<number | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState<number | null>(null);
   const [editingNameIdx, setEditingNameIdx] = useState<number | null>(null);
-  const [buildingStyles, setBuildingStyles] = useState<Record<number, BuildingStyle>>({});
+  const [buildingStyles, setBuildingStyles] = useState<Record<number, BuildingStyle>>({
+    1: BOT_DEFAULTS[0].style,
+    2: BOT_DEFAULTS[1].style,
+    3: BOT_DEFAULTS[2].style,
+  });
   const [personalities, setPersonalities] = useState<Record<number, BotPersonality>>({});
   const [personalityPickerOpen, setPersonalityPickerOpen] = useState<number | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -131,9 +142,16 @@ export default function Home() {
     if (players.length >= maxPlayers) return;
     playClick();
     const usedNames = new Set(players.map((p) => p.name));
-    const name = BOT_NAMES.find((n) => !usedNames.has(n)) ?? `Bot ${players.length}`;
-    const color = ALL_COLORS.find((c) => !usedColors.has(c)) ?? "green";
+    const botDef = BOT_DEFAULTS.find((b) => !usedNames.has(b.name));
+    const name = botDef?.name ?? `Bot ${players.length}`;
+    const color = botDef && !usedColors.has(botDef.color)
+      ? botDef.color
+      : ALL_COLORS.find((c) => !usedColors.has(c)) ?? "green";
+    const newIdx = players.length;
     setPlayers([...players, defaultPlayer(name, color, true)]);
+    if (botDef) {
+      setBuildingStyles((prev) => ({ ...prev, [newIdx]: botDef.style }));
+    }
   }
 
   function removeBot(idx: number) {
