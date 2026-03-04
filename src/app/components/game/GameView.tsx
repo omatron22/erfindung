@@ -399,7 +399,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   const myNewDevCards: DevelopmentCardType[] = myPlayer.newDevelopmentCards ?? [];
 
   return (
-    <div className="h-safe-screen flex overflow-hidden bg-[#2a6ab5]">
+    <div className="h-safe-screen flex overflow-hidden bg-[#6b5840] overscroll-none">
       {/* Left column: board + trade strips + bottom bar */}
       <div className="flex-1 flex flex-col min-w-0 relative" style={{ backgroundColor: "#6b5840" }}>
         {/* Board */}
@@ -636,10 +636,11 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
           </div>
         )}
 
-        {/* Bottom bar — cobblestone wall */}
+        {/* Bottom bar — cobblestone wall + safe area extension */}
         <div
           className="h-16 md:h-20 flex-shrink-0 flex items-center px-2 gap-1 md:gap-2 relative overflow-x-auto"
           style={{
+            paddingBottom: "env(safe-area-inset-bottom, 0px)",
             backgroundColor: "#6b5840",
             backgroundImage: `
               url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Crect width='64' height='32' fill='%236b5840'/%3E%3Crect x='1' y='1' width='30' height='14' rx='2' fill='%237a6850' stroke='%23433020' stroke-width='1'/%3E%3Crect x='33' y='1' width='30' height='14' rx='2' fill='%23705e48' stroke='%23433020' stroke-width='1'/%3E%3Crect x='17' y='17' width='30' height='14' rx='2' fill='%23756350' stroke='%23433020' stroke-width='1'/%3E%3Crect x='-15' y='17' width='30' height='14' rx='2' fill='%236e5c46' stroke='%23433020' stroke-width='1'/%3E%3Crect x='49' y='17' width='30' height='14' rx='2' fill='%23725f4a' stroke='%23433020' stroke-width='1'/%3E%3C/svg%3E")

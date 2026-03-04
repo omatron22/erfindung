@@ -26,6 +26,11 @@ body {
   min-height: 100dvh;
 }
 
+/* Prevent overscroll bounce on iOS showing wrong background */
+.overscroll-none {
+  overscroll-behavior: none;
+}
+
 /* Pixel border utilities */
 .pixel-border {
   box-shadow: 3px 3px 0 #000;
