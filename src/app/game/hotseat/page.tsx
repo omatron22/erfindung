@@ -136,7 +136,7 @@ export default function GamePage() {
         ? BOT_SETUP_DELAY_MS : BOT_DELAY_MS;
       scheduleBotAction(gameState, currentPlayer, delay);
     }
-  }, [gameState, botIndices]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gameState, botIndices, botTradeUI]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function scheduleBotAction(state: GameState, botIndex: number, delay: number) {
     setBotThinking(true);
@@ -205,8 +205,31 @@ export default function GamePage() {
   }
 
   function executeBotAction(state: GameState, botIndex: number) {
+    const isSetup = state.phase === "setup-forward" || state.phase === "setup-reverse";
+
+    // Use the latest game state to avoid stale-state issues
+    const currentState = useGameStore.getState().gameState;
+    if (currentState && currentState !== state) {
+      // State changed since this action was scheduled — reschedule with fresh state
+      if (currentState.currentPlayerIndex === botIndex) {
+        scheduleBotAction(currentState, botIndex, BOT_SETUP_DELAY_MS);
+      } else {
+        setBotThinking(false);
+      }
+      return;
+    }
+
     const action = decideBotAction(state, botIndex);
-    if (!action) { setBotThinking(false); return; }
+    if (!action) {
+      console.warn(`Bot ${botIndex} returned no action (phase=${state.phase}, placements=${state.setupPlacementsMade})`);
+      // During setup, retry after a short delay in case of transient issues
+      if (isSetup && state.currentPlayerIndex === botIndex) {
+        botTimerRef.current = setTimeout(() => executeBotAction(state, botIndex), BOT_DELAY_MS);
+        return;
+      }
+      setBotThinking(false);
+      return;
+    }
 
     // Bot-initiated trade: show trade UI to human
     if (action.type === "offer-trade") {
@@ -252,6 +275,11 @@ export default function GamePage() {
       setGameState(result.newState);
     } else {
       console.warn(`Bot ${botIndex} invalid action:`, action.type, result.error);
+      if (isSetup && state.currentPlayerIndex === botIndex) {
+        // Retry during setup — the bot may have picked a conflicting spot
+        botTimerRef.current = setTimeout(() => executeBotAction(state, botIndex), BOT_DELAY_MS);
+        return;
+      }
       if (action.type !== "end-turn" && state.currentPlayerIndex === botIndex && state.turnPhase === "trade-or-build") {
         const fallback = applyAction(state, { type: "end-turn", playerIndex: botIndex });
         if (fallback.valid && fallback.newState) setGameState(fallback.newState);
@@ -888,6 +916,9 @@ export default function GamePage() {
         onLobby={() => { resetGame(); sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-config"); sessionStorage.removeItem("catan-game-state"); sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
         onRestart={() => {
           resetGame();
+          setBotTradeUI(null);
+          setPendingTradeUI(null);
+          if (botTimerRef.current) { clearTimeout(botTimerRef.current); botTimerRef.current = null; }
           sessionStorage.removeItem("catan-game-state");
           const fullStored = sessionStorage.getItem("catan-game-config");
           const legacyStored = sessionStorage.getItem("catan-config");
@@ -918,6 +949,9 @@ export default function GamePage() {
           gameState={gameState}
           localPlayerIndex={HUMAN_PLAYER_INDEX}
           onPlayAgain={() => {
+            setBotTradeUI(null);
+            setPendingTradeUI(null);
+            if (botTimerRef.current) { clearTimeout(botTimerRef.current); botTimerRef.current = null; }
             const fullStored = sessionStorage.getItem("catan-game-config");
             const legacyStored = sessionStorage.getItem("catan-config");
             if (fullStored) {
