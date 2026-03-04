@@ -103,8 +103,8 @@ export function handleConnection(io: TypedServer, socket: TypedSocket) {
     handleUpdateConfig(io, socket, config);
   });
 
-  socket.on("room:update-player", ({ color, buildingStyle }) => {
-    handleUpdatePlayer(io, socket, color, buildingStyle);
+  socket.on("room:update-player", ({ color, buildingStyle, name }) => {
+    handleUpdatePlayer(io, socket, color, buildingStyle, name);
   });
 
   socket.on("room:update-bot", ({ playerIndex, name, color, personality }) => {
@@ -362,6 +362,7 @@ function handleUpdatePlayer(
   socket: TypedSocket,
   color?: string,
   buildingStyle?: string,
+  name?: string,
 ) {
   const room = getRoomForSocket(socket.id);
   if (!room) return;
@@ -369,6 +370,11 @@ function handleUpdatePlayer(
 
   const slot = room.players.find((p) => p.socketId === socket.id);
   if (!slot) return;
+
+  if (name !== undefined) {
+    const trimmed = name.trim().slice(0, 20);
+    if (trimmed) slot.name = trimmed;
+  }
 
   if (color !== undefined) {
     if (!(PLAYER_COLORS as readonly string[]).includes(color)) return;

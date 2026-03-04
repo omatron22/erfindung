@@ -62,6 +62,8 @@ export default function OnlineGamePage() {
   const [lobbyChatInput, setLobbyChatInput] = useState("");
   const [editingBotNameIdx, setEditingBotNameIdx] = useState<number | null>(null);
   const [editingBotName, setEditingBotName] = useState("");
+  const [editingMyName, setEditingMyName] = useState(false);
+  const [myNameDraft, setMyNameDraft] = useState("");
   const colorPickerRef = useRef<HTMLDivElement>(null);
 
   const isHost = myPlayerIndex === hostIndex;
@@ -212,6 +214,7 @@ export default function OnlineGamePage() {
   function handleBotPickColor(playerIndex: number, color: string) { socket?.emit("room:update-bot", { playerIndex, color }); setColorPickerOpen(null); }
   function handleSaveBotName(playerIndex: number) { socket?.emit("room:update-bot", { playerIndex, name: editingBotName }); setEditingBotNameIdx(null); }
   function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); setStylePickerOpen(null); }
+  function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); }
   function handleLeaveGame() { socket?.emit("room:leave-game", {}); mpStore.reset(); router.push("/"); }
   function sendLobbyChat() {
     if (!socket || !lobbyChatInput.trim()) return;
@@ -281,7 +284,20 @@ export default function OnlineGamePage() {
                       >
                         {canPickColor && <span className="absolute inset-0 flex items-center justify-center text-[7px] font-bold" style={{ color: ["white", "yellow"].includes(player.color) ? "#333" : "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{colorPickerOpen === player.index ? "\u25B2" : "\u25BC"}</span>}
                       </button>
-                      {canEditBot && editingBotNameIdx === player.index ? (
+                      {/* Editable name — human player or host editing bot */}
+                      {isMe && editingMyName ? (
+                        <input
+                          type="text"
+                          value={myNameDraft}
+                          onChange={(e) => setMyNameDraft(e.target.value)}
+                          onBlur={() => { handleUpdateName(myNameDraft); setEditingMyName(false); }}
+                          onKeyDown={(e) => { if (e.key === "Enter") { handleUpdateName(myNameDraft); setEditingMyName(false); } }}
+                          maxLength={20}
+                          placeholder="Your name..."
+                          className="flex-1 bg-white px-1 py-0.5 text-[8px] text-gray-800 border border-gray-400 focus:outline-none min-w-0 font-pixel"
+                          autoFocus
+                        />
+                      ) : canEditBot && editingBotNameIdx === player.index ? (
                         <input
                           type="text"
                           value={editingBotName}
@@ -294,12 +310,13 @@ export default function OnlineGamePage() {
                         />
                       ) : (
                       <span
-                        className={`flex-1 font-pixel text-[8px] text-gray-800 truncate ${canEditBot ? "cursor-pointer hover:text-amber-700" : ""}`}
-                        onClick={canEditBot ? () => { setEditingBotNameIdx(player.index); setEditingBotName(player.name); } : undefined}
+                        className={`flex-1 font-pixel text-[8px] text-gray-800 truncate ${(isMe || canEditBot) ? "cursor-pointer hover:text-amber-700" : ""}`}
+                        onClick={isMe ? () => { setEditingMyName(true); setMyNameDraft(player.name); } : canEditBot ? () => { setEditingBotNameIdx(player.index); setEditingBotName(player.name); } : undefined}
+                        title={isMe ? "Click to edit name" : undefined}
                       >
                         {player.name}
                         {player.isBot && <span className="text-gray-500 text-[6px] ml-1">(BOT)</span>}
-                        {player.index === hostIndex && <span className="text-amber-600 text-[6px] ml-1">HOST</span>}
+                        {player.index === hostIndex && !player.isBot && <span className="text-amber-600 text-[6px] ml-1">HOST</span>}
                       </span>
                       )}
                       {isMe && (
@@ -332,8 +349,8 @@ export default function OnlineGamePage() {
 
                     {/* Style picker dropdown */}
                     {isMe && stylePickerOpen === player.index && (
-                      <div className="absolute left-0 z-50 w-64 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                        <div className="grid grid-cols-3 gap-1">
+                      <div className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                        <div className="grid grid-cols-2 gap-1">
                           {BUILDING_STYLES.map((s) => (
                             <button key={s} className={`flex flex-col items-center gap-0.5 px-1 py-1 border-2 transition-all ${((player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE) === s ? "border-amber-500 bg-amber-50 scale-105" : "border-gray-300 hover:border-gray-600 cursor-pointer hover:scale-105"}`} onClick={() => handlePickStyle(s)}>
                               <div className="flex gap-0.5">
@@ -385,15 +402,6 @@ export default function OnlineGamePage() {
                         <button className="font-pixel text-[10px] text-gray-700 hover:text-gray-900 px-1" onClick={() => timerIdx < TURN_TIMER_OPTIONS.length - 1 && handleUpdateConfig({ turnTimer: TURN_TIMER_OPTIONS[timerIdx + 1] })}>&gt;</button>
                       </div>
                     ) : <span className="font-pixel text-[9px] text-gray-800">{lobbyConfig?.turnTimer === 0 ? "OFF" : `${lobbyConfig?.turnTimer}s`}</span>}
-                  </div>
-                  <div className="text-center">
-                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">MODE</span>
-                    {isHost ? (
-                      <div className="flex justify-center">
-                        <button className={`px-3 py-1 font-pixel text-[7px] border-2 border-black border-r-0 ${lobbyConfig?.gameMode === "classic" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"}`} onClick={() => handleUpdateConfig({ gameMode: "classic" })}>CLASSIC</button>
-                        <button className={`px-3 py-1 font-pixel text-[7px] border-2 border-black ${lobbyConfig?.gameMode === "speed" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"}`} onClick={() => handleUpdateConfig({ gameMode: "speed" })}>SPEED</button>
-                      </div>
-                    ) : <span className="font-pixel text-[9px] text-gray-800 uppercase">{lobbyConfig?.gameMode ?? "classic"}</span>}
                   </div>
                   <div className="text-center">
                     <span className="font-pixel text-[8px] text-gray-600 block mb-1">POINTS TO WIN</span>
