@@ -53,6 +53,10 @@ export default function HexBoard({
   const dragMoved = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Pinch-to-zoom state
+  const pinchStartDist = useRef(0);
+  const pinchStartZoom = useRef(1);
+  const isPinching = useRef(false);
 
   const padding = size * 2.8;
   // Use actual hex coords from board for expansion support
@@ -104,6 +108,52 @@ export default function HexBoard({
     setIsDragging(false);
   }, []);
 
+  // Pinch-to-zoom touch handlers
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      isPinching.current = true;
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchStartDist.current = Math.hypot(dx, dy);
+      pinchStartZoom.current = zoom;
+      flashZoomControls();
+    }
+  }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2 && isPinching.current) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const dist = Math.hypot(dx, dy);
+      const scale = dist / pinchStartDist.current;
+      setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinchStartZoom.current * scale)));
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    isPinching.current = false;
+  }, []);
+
+  // Prevent browser zoom on the board container (passive: false needed for preventDefault)
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const preventGesture = (e: Event) => e.preventDefault();
+    el.addEventListener("gesturestart", preventGesture, { passive: false });
+    el.addEventListener("gesturechange", preventGesture, { passive: false });
+    // Also prevent touchmove default during pinch to stop page zoom
+    const preventTouchZoom = (e: TouchEvent) => {
+      if (e.touches.length >= 2) e.preventDefault();
+    };
+    el.addEventListener("touchmove", preventTouchZoom, { passive: false });
+    return () => {
+      el.removeEventListener("gesturestart", preventGesture);
+      el.removeEventListener("gesturechange", preventGesture);
+      el.removeEventListener("touchmove", preventTouchZoom);
+    };
+  }, []);
+
   // Clean up timeout on unmount
   useEffect(() => {
     return () => {
@@ -115,12 +165,15 @@ export default function HexBoard({
     <div
       ref={containerRef}
       className="relative w-full h-full overflow-hidden"
-      style={{ cursor: isDragging ? "grabbing" : "grab" }}
+      style={{ cursor: isDragging ? "grabbing" : "grab", touchAction: "none" }}
       onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
       <div
         className="w-full h-full origin-center"
