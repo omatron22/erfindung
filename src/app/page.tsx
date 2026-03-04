@@ -12,6 +12,7 @@ import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { playClick, playNavigate, playError as playErrorSound, startMusic, stopMusic } from "@/app/utils/sounds";
 import AudioControls from "@/app/components/ui/AudioControls";
+import { WoolPixel } from "@/app/components/icons/PixelIcons";
 
 const ALL_COLORS = PLAYER_COLORS;
 const BOT_NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve"];
@@ -35,29 +36,9 @@ function PixelCloud({ size = 80, color = "white" }: { size?: number; color?: str
   );
 }
 
-/** Simplified pixel-art sheep cloud — cloud shape with a head bump on the right and small legs */
-function PixelSheepCloud({ size = 80, color = "white" }: { size?: number; color?: string }) {
-  const s = size / 80;
-  return (
-    <svg width={80 * s} height={40 * s} viewBox="0 0 80 40" shapeRendering="crispEdges">
-      {/* Cloud body */}
-      <rect x="20" y="4"  width="16" height="4" fill={color} />
-      <rect x="8"  y="8"  width="52" height="4" fill={color} />
-      <rect x="4"  y="12" width="60" height="4" fill={color} />
-      <rect x="4"  y="16" width="64" height="4" fill={color} />
-      <rect x="8"  y="20" width="56" height="4" fill={color} />
-      <rect x="16" y="24" width="44" height="4" fill={color} />
-      {/* Head — single rounded bump on right */}
-      <rect x="60" y="8"  width="12" height="4" fill={color} />
-      <rect x="64" y="4"  width="8"  height="4" fill={color} />
-      <rect x="64" y="12" width="12" height="8" fill={color} />
-      {/* Legs */}
-      <rect x="20" y="28" width="4" height="8" fill={color} />
-      <rect x="32" y="28" width="4" height="8" fill={color} />
-      <rect x="44" y="28" width="4" height="8" fill={color} />
-      <rect x="56" y="28" width="4" height="8" fill={color} />
-    </svg>
-  );
+/** Sheep cloud — uses the existing WoolPixel (sheep icon) scaled up */
+function PixelSheepCloud({ size = 80 }: { size?: number; color?: string }) {
+  return <WoolPixel size={size} color="white" />;
 }
 
 const CLOUDS: { top: string; size: number; duration: number; delay: number; opacity: number; sheep?: boolean }[] = [
