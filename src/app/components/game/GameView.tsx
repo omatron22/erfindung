@@ -639,7 +639,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
 
         {/* Bottom bar — cobblestone wall + safe area extension */}
         <div
-          className="h-16 md:h-20 flex-shrink-0 flex items-center px-2 gap-1 md:gap-2 relative overflow-x-auto overflow-y-visible"
+          className="h-16 md:h-20 flex-shrink-0 flex items-center px-2 gap-1 md:gap-2 relative overflow-x-auto"
           style={{
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
             backgroundColor: "#6b5840",
@@ -726,7 +726,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                       </span>
                     )}
                   </button>
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-50 pointer-events-none">
+                  <div className="fixed bottom-20 left-2 hidden group-hover:block z-[9999] pointer-events-none">
                     <div className="bg-[#1a1a2e] border-2 border-purple-500 px-2 py-1 whitespace-nowrap" style={{ boxShadow: "2px 2px 0 #000" }}>
                       <span className="font-pixel text-[6px] text-purple-200">{formatDevCard(card)}</span>
                     </div>

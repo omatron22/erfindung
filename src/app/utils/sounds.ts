@@ -93,12 +93,15 @@ function playSquareNote(freq: number, startTime: number, duration: number, volum
   osc.frequency.setValueAtTime(freq, startTime);
 
   const gain = ctx.createGain();
-  gain.gain.setValueAtTime(vol, startTime);
+  // Tiny fade-in to prevent click/pop artifacts
+  gain.gain.setValueAtTime(0.001, startTime);
+  gain.gain.linearRampToValueAtTime(vol, startTime + 0.003);
+  gain.gain.setValueAtTime(vol, startTime + Math.max(0, duration - 0.01));
   gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
 
   osc.connect(gain).connect(ctx.destination);
   osc.start(startTime);
-  osc.stop(startTime + duration);
+  osc.stop(startTime + duration + 0.01);
 }
 
 /** Dice rattle — fast descending noise burst (8-bit style) */
@@ -220,12 +223,12 @@ export function playWin() {
   playSquareNote(1047, t + 0.45, 0.3, 0.12); // C6
 }
 
-/** Collect resources — happy coin pickup */
+/** Collect resources — gentle coin chime */
 export function playCollect() {
   const ctx = getContext();
   const t = ctx.currentTime;
-  playSquareNote(784, t, 0.06, 0.06);
-  playSquareNote(1047, t + 0.06, 0.1, 0.07);
+  playSquareNote(659, t, 0.1, 0.04);
+  playSquareNote(784, t + 0.1, 0.15, 0.04);
 }
 
 /** Button click — tiny tick */
