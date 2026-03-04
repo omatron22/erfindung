@@ -72,7 +72,7 @@ export function updateLongestRoad(state: GameState): {
   const currentHolderLength = holder !== null ? playerLengths[holder] : 0;
 
   // Find the player with the longest road >= 5
-  let maxLength = MIN_ROADS_FOR_LONGEST_ROAD;
+  let maxLength = MIN_ROADS_FOR_LONGEST_ROAD - 1;
   let maxPlayer: number | null = null;
   let tied = false;
 

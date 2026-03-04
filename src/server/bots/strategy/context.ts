@@ -220,8 +220,8 @@ function computeBuildGoal(
   const candidates: Array<BuildGoal & { score: number }> = [];
 
   const buildTypes: Array<{ type: BuildGoal["type"]; costKey: string; weight: number; canBuild: boolean }> = [
-    { type: "city", costKey: "city", weight: weights.cityScore, canBuild: player.settlements.length > 0 && player.cities.length < 4 },
-    { type: "settlement", costKey: "settlement", weight: weights.settlementScore, canBuild: player.settlements.length + player.cities.length < 5 },
+    { type: "city", costKey: "city", weight: weights.cityScore * 1.5, canBuild: player.settlements.length > 0 && player.cities.length < 4 },
+    { type: "settlement", costKey: "settlement", weight: weights.settlementScore * 1.5, canBuild: player.settlements.length + player.cities.length < 5 },
     { type: "road", costKey: "road", weight: weights.roadScore, canBuild: player.roads.length < 15 },
     { type: "developmentCard", costKey: "developmentCard", weight: weights.devCardScore, canBuild: state.developmentCardDeck.length > 0 },
   ];

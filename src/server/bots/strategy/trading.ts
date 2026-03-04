@@ -196,18 +196,19 @@ function getBuildGoals(state: GameState, playerIndex: number, context?: BotStrat
 }
 
 /**
- * Should bot reject a trade that helps the VP leader?
+ * Should bot reject a trade that helps the proposer?
+ * Reject if proposer has 2+ more VP than the bot.
  */
 export function shouldRejectLeaderTrade(
   state: GameState,
   fromPlayer: number,
   context: BotStrategicContext
 ): boolean {
-  if (context.playerThreats.length === 0) return false;
-  const leader = context.playerThreats[0];
-  if (leader.playerIndex !== fromPlayer) return false;
-  // Reject if leader is within 2 VP of winning
-  return leader.visibleVP >= context.vpToWin - 2;
+  const fromVP = state.players[fromPlayer].victoryPoints;
+  const botVP = state.players[context.turnOrderPosition].victoryPoints;
+  // Reject if proposer is 2+ VP ahead of us
+  if (fromVP >= botVP + 2) return true;
+  return false;
 }
 
 /**

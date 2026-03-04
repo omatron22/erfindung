@@ -465,7 +465,21 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
               {showTradeStrip && (
                 <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-2 py-1.5 pointer-events-auto" style={{ backdropFilter: "blur(4px)" }}>
                   <div className="flex flex-col gap-1">
-                    {/* GET row */}
+                    {/* GIVE row (top) */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[7px] text-green-700 font-bold w-7">GIVE:</span>
+                      <div className="flex items-center gap-0.5 min-w-[60px]">
+                        {trade.offering.length === 0 ? (
+                          <span className="text-[6px] text-gray-500">click cards</span>
+                        ) : (
+                          trade.offering.map((res, i) => (
+                            <MiniCard key={`o-${i}`} resource={res} onClick={() => trade.removeFromOffering(i)} glow="green" />
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    {/* GET row (bottom) */}
                     <div className="flex items-center gap-1.5">
                       <span className="text-[7px] text-red-700 font-bold w-7">GET:</span>
                       <div className="flex gap-0.5">
@@ -487,20 +501,6 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                         ) : (
                           trade.requesting.map((res, i) => (
                             <MiniCard key={`r-${i}`} resource={res} onClick={() => trade.removeFromRequesting(i)} glow="red" />
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    {/* GIVE row */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[7px] text-green-700 font-bold w-7">GIVE:</span>
-                      <div className="flex items-center gap-0.5 min-w-[60px]">
-                        {trade.offering.length === 0 ? (
-                          <span className="text-[6px] text-gray-500">click cards</span>
-                        ) : (
-                          trade.offering.map((res, i) => (
-                            <MiniCard key={`o-${i}`} resource={res} onClick={() => trade.removeFromOffering(i)} glow="green" />
                           ))
                         )}
                       </div>
@@ -526,7 +526,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                                 ? `Bank trade ${bankInfo.ratio}:1 — click to execute`
                                 : `Select ${bankInfo.receivingCount} resource(s) to receive (${bankInfo.ratio}:1)`}
                             >
-                              BANK {bankInfo.ratio}:1
+                              BANK
                             </button>
                           ) : null;
                         })()}
@@ -599,23 +599,12 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
           )}
         </div>
 
-        {/* Bottom bar — cobblestone wall */}
-        <div
-          className={`${needsDiscard ? "py-1.5" : "h-20"} flex-shrink-0 flex ${needsDiscard ? "flex-col gap-1 px-2" : "items-center px-2 gap-2"} relative`}
-          style={{
-            backgroundColor: "#6b5840",
-            backgroundImage: `
-              url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Crect width='64' height='32' fill='%236b5840'/%3E%3Crect x='1' y='1' width='30' height='14' rx='2' fill='%237a6850' stroke='%23433020' stroke-width='1'/%3E%3Crect x='33' y='1' width='30' height='14' rx='2' fill='%23705e48' stroke='%23433020' stroke-width='1'/%3E%3Crect x='17' y='17' width='30' height='14' rx='2' fill='%23756350' stroke='%23433020' stroke-width='1'/%3E%3Crect x='-15' y='17' width='30' height='14' rx='2' fill='%236e5c46' stroke='%23433020' stroke-width='1'/%3E%3Crect x='49' y='17' width='30' height='14' rx='2' fill='%23725f4a' stroke='%23433020' stroke-width='1'/%3E%3C/svg%3E")
-            `,
-            backgroundSize: "64px 32px",
-            boxShadow: "inset 0 4px 6px rgba(0,0,0,0.5), 0 -2px 0 #2a1a0a",
-          }}
-        >
-          {/* Discard staging area (top row) */}
-          {needsDiscard && (
-            <div className="flex items-center gap-2 bg-red-900/40 border border-red-500/50 px-2 py-1 rounded-sm">
-              <span className="font-pixel text-[8px] text-red-400 shrink-0">
-                DISCARDING {currentDiscardCount}/{discardAmount}
+        {/* Discard overlay — floats above the brick bar */}
+        {needsDiscard && (
+          <div className="flex-shrink-0 relative z-10 mx-2 mb-1" style={{ maxWidth: "calc(100% - 160px)" }}>
+            <div className="flex items-center gap-2 bg-red-900/90 border-2 border-red-500 px-3 py-2" style={{ imageRendering: "pixelated", boxShadow: "3px 3px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>
+              <span className="font-pixel text-[8px] text-red-300 shrink-0">
+                DISCARD {currentDiscardCount}/{discardAmount}
               </span>
               <div className="flex items-center gap-0.5 flex-1 min-h-[36px]">
                 {currentDiscardCount === 0 ? (
@@ -640,8 +629,21 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                 CONFIRM
               </button>
             </div>
-          )}
+          </div>
+        )}
 
+        {/* Bottom bar — cobblestone wall */}
+        <div
+          className="h-20 flex-shrink-0 flex items-center px-2 gap-2 relative"
+          style={{
+            backgroundColor: "#6b5840",
+            backgroundImage: `
+              url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Crect width='64' height='32' fill='%236b5840'/%3E%3Crect x='1' y='1' width='30' height='14' rx='2' fill='%237a6850' stroke='%23433020' stroke-width='1'/%3E%3Crect x='33' y='1' width='30' height='14' rx='2' fill='%23705e48' stroke='%23433020' stroke-width='1'/%3E%3Crect x='17' y='17' width='30' height='14' rx='2' fill='%23756350' stroke='%23433020' stroke-width='1'/%3E%3Crect x='-15' y='17' width='30' height='14' rx='2' fill='%236e5c46' stroke='%23433020' stroke-width='1'/%3E%3Crect x='49' y='17' width='30' height='14' rx='2' fill='%23725f4a' stroke='%23433020' stroke-width='1'/%3E%3C/svg%3E")
+            `,
+            backgroundSize: "64px 32px",
+            boxShadow: "inset 0 4px 6px rgba(0,0,0,0.5), 0 -2px 0 #2a1a0a",
+          }}
+        >
           {/* Resource cards row */}
           <div className="flex items-end gap-0.5">
             {myResources
@@ -677,45 +679,51 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
             {myDevCards.map((card: DevelopmentCardType, i: number) => {
               const isPlayable = canTradeOrBuild && !myPlayer.hasPlayedDevCardThisTurn && card !== "victoryPoint";
               return (
-                <button
-                  key={`dev-${i}`}
-                  className={`w-10 h-14 flex flex-col items-center justify-center border-2 border-black bg-purple-700 relative ${
-                    isPlayable ? "cursor-pointer hover:bg-purple-600 hover:border-amber-400" : ""
-                  }`}
-                  title={formatDevCard(card) + (isPlayable ? " (click to play)" : card === "victoryPoint" ? "" : myPlayer.hasPlayedDevCardThisTurn ? " (already played one this turn)" : "")}
-                  onClick={() => {
-                    if (!isPlayable) return;
-                    if (card === "knight") {
-                      onAction({ type: "play-knight", playerIndex: myPlayerIndex });
-                    } else if (card === "roadBuilding") {
-                      onAction({ type: "play-road-building", playerIndex: myPlayerIndex });
-                    } else if (card === "monopoly") {
-                      setActiveAction("monopoly");
-                    } else if (card === "yearOfPlenty") {
-                      setActiveAction("year-of-plenty");
-                    }
-                  }}
-                >
-                  {card === "knight" ? (
-                    <HelmetPixel size={14} color="white" />
-                  ) : card === "victoryPoint" ? (
-                    <CrownPixel size={14} color="#fbbf24" />
-                  ) : card === "roadBuilding" ? (
-                    <RoadBuildPixel size={14} color="white" />
-                  ) : card === "yearOfPlenty" ? (
-                    <CornucopiaPixel size={14} color="white" />
-                  ) : card === "monopoly" ? (
-                    <MonopolyPixel size={14} color="white" />
-                  ) : (
-                    <ScrollPixel size={14} color="white" />
-                  )}
-                  <span className="text-[5px] text-purple-200">{formatDevCardShort(card)}</span>
-                  {isPlayable && (
-                    <span className="absolute -top-1 -right-1 bg-green-500 text-black text-[5px] px-0.5 border border-black leading-none py-0.5">
-                      PLAY
-                    </span>
-                  )}
-                </button>
+                <div key={`dev-${i}`} className="relative group">
+                  <button
+                    className={`w-10 h-14 flex flex-col items-center justify-center border-2 border-black bg-purple-700 relative ${
+                      isPlayable ? "cursor-pointer hover:bg-purple-600 hover:border-amber-400" : ""
+                    }`}
+                    title={formatDevCard(card)}
+                    onClick={() => {
+                      if (!isPlayable) return;
+                      if (card === "knight") {
+                        onAction({ type: "play-knight", playerIndex: myPlayerIndex });
+                      } else if (card === "roadBuilding") {
+                        onAction({ type: "play-road-building", playerIndex: myPlayerIndex });
+                      } else if (card === "monopoly") {
+                        setActiveAction("monopoly");
+                      } else if (card === "yearOfPlenty") {
+                        setActiveAction("year-of-plenty");
+                      }
+                    }}
+                  >
+                    {card === "knight" ? (
+                      <HelmetPixel size={14} color="white" />
+                    ) : card === "victoryPoint" ? (
+                      <CrownPixel size={14} color="#fbbf24" />
+                    ) : card === "roadBuilding" ? (
+                      <RoadBuildPixel size={14} color="white" />
+                    ) : card === "yearOfPlenty" ? (
+                      <CornucopiaPixel size={14} color="white" />
+                    ) : card === "monopoly" ? (
+                      <MonopolyPixel size={14} color="white" />
+                    ) : (
+                      <ScrollPixel size={14} color="white" />
+                    )}
+                    <span className="text-[5px] text-purple-200">{formatDevCardShort(card)}</span>
+                    {isPlayable && (
+                      <span className="absolute -top-1 -right-1 bg-green-500 text-black text-[5px] px-0.5 border border-black leading-none py-0.5">
+                        PLAY
+                      </span>
+                    )}
+                  </button>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-50 pointer-events-none">
+                    <div className="bg-[#1a1a2e] border-2 border-purple-500 px-2 py-1 whitespace-nowrap" style={{ boxShadow: "2px 2px 0 #000" }}>
+                      <span className="font-pixel text-[6px] text-purple-200">{formatDevCard(card)}</span>
+                    </div>
+                  </div>
+                </div>
               );
             })}
 

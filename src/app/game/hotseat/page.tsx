@@ -236,10 +236,28 @@ export default function GamePage() {
     tradeTimersRef.current.push(autoTimer);
   }
 
+  function canHumanAffordBotTrade(): boolean {
+    if (!botTradeUI || !gameState) return false;
+    const trade = botTradeUI.tradeState.pendingTrade;
+    if (!trade) return false;
+    const human = gameState.players[HUMAN_PLAYER_INDEX];
+    for (const [res, amount] of Object.entries(trade.requesting)) {
+      if ((amount || 0) > human.resources[res as Resource]) return false;
+    }
+    return true;
+  }
+
   function handleBotTradeAccept() {
     if (!botTradeUI) return;
     const trade = botTradeUI.tradeState.pendingTrade;
     if (!trade) { setBotTradeUI(null); return; }
+
+    // Validate human can afford to give the requested resources
+    if (!canHumanAffordBotTrade()) {
+      playError();
+      handleBotTradeReject();
+      return;
+    }
 
     const result = applyAction(botTradeUI.tradeState, {
       type: "accept-trade",
@@ -254,7 +272,8 @@ export default function GamePage() {
       // Continue bot's turn after trade
       setTimeout(() => scheduleBotAction(result.newState!, bot, BOT_DELAY_MS), 400);
     } else {
-      setBotTradeUI(null);
+      // Trade failed — cancel and continue bot's turn
+      handleBotTradeReject();
     }
   }
 
@@ -330,7 +349,7 @@ export default function GamePage() {
 
   useEffect(() => {
     const timerSeconds = fullConfig?.turnTimer;
-    if (!timerSeconds || !gameState || gameState.phase === "finished" || gameState.phase === "waiting") {
+    if (!gameState || gameState.phase === "finished" || gameState.phase === "waiting") {
       setTurnDeadline(null); return;
     }
 
@@ -338,10 +357,36 @@ export default function GamePage() {
     const needsHumanDiscard = gameState.turnPhase === "discard" &&
       gameState.discardingPlayers.includes(HUMAN_PLAYER_INDEX);
 
-    // Setup phases: timer only when it's the human's turn
+    // Setup phases: always use 30s timer for human, regardless of turnTimer config
     const isSetup = gameState.phase === "setup-forward" || gameState.phase === "setup-reverse";
+    const SETUP_TIMER = 30;
+
+    if (isSetup && isHumanTurn) {
+      const deadline = Date.now() + SETUP_TIMER * 1000;
+      setTurnDeadline(deadline);
+
+      const timeout = setTimeout(() => {
+        const state = gameStateRef.current;
+        if (!state) return;
+        const action = decideBotAction(state, HUMAN_PLAYER_INDEX);
+        if (action) {
+          const result = applyAction(state, action);
+          if (result.valid && result.newState) {
+            playActionSound(action.type);
+            setGameState(result.newState);
+          }
+        }
+      }, SETUP_TIMER * 1000);
+
+      return () => clearTimeout(timeout);
+    }
+
+    // Non-setup phases require turnTimer to be set
+    if (!timerSeconds) {
+      setTurnDeadline(null); return;
+    }
+
     const humanNeedsToAct =
-      (isSetup && isHumanTurn) ||
       (gameState.phase === "main" && isHumanTurn) ||
       needsHumanDiscard;
 
@@ -613,6 +658,7 @@ export default function GamePage() {
     const trade = gameState.pendingTrade;
     const bot = gameState.players[botTradeUI.initiatingBot];
     const botColor = PLAYER_COLOR_HEX[bot.color];
+    const humanCanAfford = canHumanAffordBotTrade();
     return (
       <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-4 py-3 pointer-events-auto" style={{ backdropFilter: "blur(4px)" }}>
         <div className="flex flex-col gap-2">
@@ -622,18 +668,7 @@ export default function GamePage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1">
-              <span className="font-pixel text-[7px] text-gray-500">GIVES:</span>
-              <div className="flex gap-0.5">
-                {Object.entries(trade.offering).flatMap(([r, amt]) =>
-                  Array.from({ length: amt! }, (_, i) => (
-                    <MiniCard key={`bo-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
-                  ))
-                )}
-              </div>
-            </div>
-            <span className="font-pixel text-[8px] text-gray-400">FOR</span>
-            <div className="flex items-center gap-1">
-              <span className="font-pixel text-[7px] text-gray-500">WANTS:</span>
+              <span className="font-pixel text-[7px] text-red-700 font-bold">YOU GIVE:</span>
               <div className="flex gap-0.5">
                 {Object.entries(trade.requesting).flatMap(([r, amt]) =>
                   Array.from({ length: amt! }, (_, i) => (
@@ -642,11 +677,28 @@ export default function GamePage() {
                 )}
               </div>
             </div>
+            <span className="font-pixel text-[10px] text-gray-400">&rarr;</span>
+            <div className="flex items-center gap-1">
+              <span className="font-pixel text-[7px] text-green-700 font-bold">YOU GET:</span>
+              <div className="flex gap-0.5">
+                {Object.entries(trade.offering).flatMap(([r, amt]) =>
+                  Array.from({ length: amt! }, (_, i) => (
+                    <MiniCard key={`bo-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
+                  ))
+                )}
+              </div>
+            </div>
           </div>
           <div className="flex gap-2 justify-center">
             <button
               onClick={handleBotTradeAccept}
-              className="px-4 py-1.5 bg-green-600 text-white font-pixel text-[8px] border-2 border-black hover:bg-green-500"
+              disabled={!humanCanAfford}
+              className={`px-4 py-1.5 font-pixel text-[8px] border-2 border-black ${
+                humanCanAfford
+                  ? "bg-green-600 text-white hover:bg-green-500"
+                  : "bg-gray-500 text-gray-300 cursor-not-allowed"
+              }`}
+              title={humanCanAfford ? "Accept this trade" : "You don't have the required resources"}
             >
               ACCEPT
             </button>
@@ -691,19 +743,20 @@ export default function GamePage() {
                 {status === "rejected" && !counter && <XMarkPixel size={14} color="#dc2626" />}
                 {status === "rejected" && counter && pendingTradeUI.resolved && (
                   <div className="flex items-center gap-1">
-                    <span className="font-pixel text-[6px] text-amber-700">COUNTER:</span>
-                    <div className="flex gap-0.5">
-                      {Object.entries(counter.offering).flatMap(([r, amt]) =>
-                        Array.from({ length: amt! }, (_, i) => (
-                          <MiniCard key={`co-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
-                        ))
-                      )}
-                    </div>
-                    <span className="text-[7px] text-gray-500">for</span>
+                    <span className="font-pixel text-[6px] text-red-700">GIVE:</span>
                     <div className="flex gap-0.5">
                       {Object.entries(counter.requesting).flatMap(([r, amt]) =>
                         Array.from({ length: amt! }, (_, i) => (
                           <MiniCard key={`cr-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
+                        ))
+                      )}
+                    </div>
+                    <span className="text-[8px] text-gray-400">&rarr;</span>
+                    <span className="font-pixel text-[6px] text-green-700">GET:</span>
+                    <div className="flex gap-0.5">
+                      {Object.entries(counter.offering).flatMap(([r, amt]) =>
+                        Array.from({ length: amt! }, (_, i) => (
+                          <MiniCard key={`co-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
                         ))
                       )}
                     </div>
@@ -725,6 +778,14 @@ export default function GamePage() {
             );
           })}
         </div>
+        {pendingTradeUI.resolved && (
+          <button
+            onClick={declineAllTrades}
+            className="px-3 py-1.5 bg-gray-600 text-white font-pixel text-[7px] border-2 border-black hover:bg-gray-500 ml-auto shrink-0"
+          >
+            CANCEL TRADE
+          </button>
+        )}
       </div>
     </div>
   ) : null;

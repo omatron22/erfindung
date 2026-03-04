@@ -159,11 +159,10 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
   // 2. Adaptive build priorities — score each option with personality weights
   const options: BuildOption[] = [];
 
-  // City
+  // City (highest priority — direct VP)
   if (canAfford(player, BUILDING_COSTS.city) && player.settlements.length > 0) {
-    let score = 80 * w.cityScore;
+    let score = 100 * w.cityScore;
     if (context.strategy === "cities") score += 20;
-    // Endgame acceleration: cities give direct VP
     if (context.isEndgame) score += 30;
     options.push({
       name: "city",
@@ -175,28 +174,14 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
     });
   }
 
-  // Dev card
-  if (canAfford(player, BUILDING_COSTS.developmentCard) && state.developmentCardDeck.length > 0) {
-    let score = 30 * w.devCardScore;
-    if (context.distanceToLargestArmy <= 2) score += 60;
-    if (context.distanceToLargestArmy <= 1) score += 80;
-    if (context.strategy === "development") score += 30;
-    // Endgame: bonus if close to largest army
-    if (context.isEndgame && context.distanceToLargestArmy <= 2) score += 25;
-    options.push({
-      name: "devCard",
-      score,
-      execute: () => ({ type: "buy-development-card", playerIndex: botIndex }),
-    });
-  }
-
-  // Settlement
+  // Settlement (second priority — direct VP)
+  let hasReachableVertex = false;
   if (canAfford(player, BUILDING_COSTS.settlement)) {
     const vertex = pickBuildVertex(state, botIndex);
     if (vertex) {
-      let score = 60 * w.settlementScore;
+      hasReachableVertex = true;
+      let score = 80 * w.settlementScore;
       if (context.strategy === "expansion") score += 15;
-      // Endgame acceleration: settlements give direct VP
       if (context.isEndgame) score += 20;
       options.push({
         name: "settlement",
@@ -206,15 +191,30 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
     }
   }
 
+  // Dev card
+  if (canAfford(player, BUILDING_COSTS.developmentCard) && state.developmentCardDeck.length > 0) {
+    let score = 25 * w.devCardScore;
+    if (context.distanceToLargestArmy <= 2) score += 60;
+    if (context.distanceToLargestArmy <= 1) score += 80;
+    if (context.strategy === "development") score += 30;
+    if (context.isEndgame && context.distanceToLargestArmy <= 2) score += 25;
+    options.push({
+      name: "devCard",
+      score,
+      execute: () => ({ type: "buy-development-card", playerIndex: botIndex }),
+    });
+  }
+
   // Road
   if (canAfford(player, BUILDING_COSTS.road) && player.roads.length < 15) {
     const edge = pickBuildRoad(state, botIndex, context);
     if (edge) {
-      let score = 20 * w.roadScore;
+      let score = 15 * w.roadScore;
       if (context.distanceToLongestRoad <= 2) score += 50;
       if (context.strategy === "expansion") score += 10;
-      // Endgame: roads only get bonus if longest road is close
       if (context.isEndgame && context.distanceToLongestRoad <= 2) score += 15;
+      // Boost road score when no reachable vertex — need roads to expand
+      if (!hasReachableVertex) score += 40;
       options.push({
         name: "road",
         score,
@@ -398,6 +398,15 @@ export function generateBotCounterOffer(
   }
 }
 
+// Per-turn trade memory to reject repeated identical trades
+const tradeMemory = new Map<string, { tradeHash: string; turn: number }>();
+
+function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: Partial<Record<Resource, number>>): string {
+  const o = ALL_RESOURCES.map((r) => offering[r] ?? 0).join(",");
+  const r = ALL_RESOURCES.map((res) => requesting[res] ?? 0).join(",");
+  return `${o}|${r}`;
+}
+
 /**
  * Decide whether a bot should accept or reject a pending trade offer.
  * Enhanced: uses build goal and personality weights for threshold.
@@ -407,6 +416,14 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   if (!trade) return "reject";
   if (trade.fromPlayer === botIndex) return "reject";
   if (trade.toPlayer !== null && trade.toPlayer !== botIndex) return "reject";
+
+  // Reject repeated identical trades within the same turn
+  const memKey = `${botIndex}`;
+  const tradeHash = getTradeHash(trade.offering, trade.requesting);
+  const mem = tradeMemory.get(memKey);
+  if (mem && mem.tradeHash === tradeHash && mem.turn === state.turnNumber) {
+    return "reject";
+  }
 
   const bot = state.players[botIndex];
 
@@ -443,14 +460,14 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   let lossScore = 0;
 
   if (context?.buildGoal) {
-    // Use build goal for precise need evaluation
+    // Use build goal for precise need evaluation — strongly favor goal resources
     for (const [res, amount] of Object.entries(trade.offering)) {
       const goalNeed = context.buildGoal.missingResources[res as Resource] ?? 0;
-      gainScore += goalNeed > 0 ? (amount || 0) * 3 : (amount || 0) * 0.5;
+      gainScore += goalNeed > 0 ? (amount || 0) * 5 : (amount || 0) * 0.1;
     }
     for (const [res, amount] of Object.entries(trade.requesting)) {
       const goalNeed = context.buildGoal.missingResources[res as Resource] ?? 0;
-      lossScore += goalNeed > 0 ? (amount || 0) * 3 : (amount || 0) * 0.5;
+      lossScore += goalNeed > 0 ? (amount || 0) * 5 : (amount || 0) * 0.1;
     }
   } else {
     // Fallback to generic resource need scoring
@@ -484,7 +501,14 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   const threshold = context?.weights.tradeAcceptThreshold ?? 0;
   const netBenefit = gainScore - lossScore;
 
-  if (netBenefit > threshold) return "accept";
-  if (netBenefit === threshold && Math.random() < 0.3) return "accept";
+  if (netBenefit > threshold) {
+    // Record this trade in memory so we reject repeats
+    tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber });
+    return "accept";
+  }
+  if (netBenefit === threshold && Math.random() < 0.3) {
+    tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber });
+    return "accept";
+  }
   return "reject";
 }

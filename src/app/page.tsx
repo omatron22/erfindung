@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import { PLAYER_COLORS } from "@/shared/types/game";
-import type { GameConfig, PlayerConfig, GameMode, BuildingStyle, TurnTimer, BotPersonality } from "@/shared/types/config";
+import type { GameConfig, PlayerConfig, BuildingStyle, TurnTimer, BotPersonality } from "@/shared/types/config";
 import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS, BOT_PERSONALITIES, DEFAULT_BOT_PERSONALITY } from "@/shared/types/config";
 import { STYLE_DEFS } from "@/shared/buildingStyles";
 import { StylePreview, RuleCard, PersonalityIcon, PERSONALITY_LABELS } from "@/app/components/ui/LobbyComponents";
@@ -35,44 +35,27 @@ function PixelCloud({ size = 80, color = "white" }: { size?: number; color?: str
   );
 }
 
-/** Pixel-art sheep-shaped cloud — fluffy body with head, ears, legs and a tiny tail */
+/** Simplified pixel-art sheep cloud — cloud shape with subtle head bump and small legs */
 function PixelSheepCloud({ size = 80, color = "white" }: { size?: number; color?: string }) {
-  const s = size / 96;
+  const s = size / 80;
   return (
-    <svg width={96 * s} height={56 * s} viewBox="0 0 96 56" shapeRendering="crispEdges">
-      {/* Fluffy wool body */}
-      <rect x="24" y="4"  width="12" height="4" fill={color} />
-      <rect x="44" y="4"  width="16" height="4" fill={color} />
-      <rect x="16" y="8"  width="52" height="4" fill={color} />
-      <rect x="12" y="12" width="60" height="4" fill={color} />
-      <rect x="12" y="16" width="64" height="4" fill={color} />
-      <rect x="16" y="20" width="60" height="4" fill={color} />
-      <rect x="16" y="24" width="56" height="4" fill={color} />
-      <rect x="20" y="28" width="48" height="4" fill={color} />
-      {/* Head */}
-      <rect x="72" y="12" width="16" height="4" fill={color} />
-      <rect x="76" y="8"  width="12" height="4" fill={color} />
-      <rect x="72" y="16" width="20" height="4" fill={color} />
-      <rect x="72" y="20" width="20" height="4" fill={color} />
-      <rect x="76" y="24" width="12" height="4" fill={color} />
-      {/* Eye */}
-      <rect x="84" y="16" width="4"  height="4" fill="#5a7ab5" />
-      {/* Ears */}
-      <rect x="76" y="4"  width="4"  height="4" fill={color} />
-      <rect x="84" y="4"  width="4"  height="8" fill={color} />
+    <svg width={80 * s} height={44 * s} viewBox="0 0 80 44" shapeRendering="crispEdges">
+      {/* Cloud body */}
+      <rect x="20" y="0"  width="16" height="4" fill={color} />
+      <rect x="8"  y="4"  width="56" height="4" fill={color} />
+      <rect x="4"  y="8"  width="68" height="4" fill={color} />
+      <rect x="4"  y="12" width="72" height="4" fill={color} />
+      <rect x="8"  y="16" width="68" height="4" fill={color} />
+      <rect x="12" y="20" width="56" height="4" fill={color} />
+      <rect x="16" y="24" width="48" height="4" fill={color} />
+      {/* Head bump */}
+      <rect x="64" y="4"  width="12" height="4" fill={color} />
+      <rect x="68" y="0"  width="8"  height="4" fill={color} />
       {/* Legs */}
-      <rect x="24" y="32" width="4"  height="8" fill={color} />
-      <rect x="32" y="32" width="4"  height="8" fill={color} />
-      <rect x="52" y="32" width="4"  height="8" fill={color} />
-      <rect x="60" y="32" width="4"  height="8" fill={color} />
-      {/* Hooves */}
-      <rect x="24" y="40" width="4"  height="4" fill="#c8b89a" />
-      <rect x="32" y="40" width="4"  height="4" fill="#c8b89a" />
-      <rect x="52" y="40" width="4"  height="4" fill="#c8b89a" />
-      <rect x="60" y="40" width="4"  height="4" fill="#c8b89a" />
-      {/* Tail */}
-      <rect x="12" y="16" width="4"  height="4" fill={color} />
-      <rect x="8"  y="12" width="4"  height="8" fill={color} />
+      <rect x="20" y="28" width="4" height="8" fill={color} />
+      <rect x="32" y="28" width="4" height="8" fill={color} />
+      <rect x="48" y="28" width="4" height="8" fill={color} />
+      <rect x="60" y="28" width="4" height="8" fill={color} />
     </svg>
   );
 }
@@ -84,13 +67,13 @@ const CLOUDS: { top: string; size: number; duration: number; delay: number; opac
   { top: "28%",  size: 180, duration: 22, delay: -6,  opacity: 1    },
   { top: "72%",  size: 190, duration: 28, delay: -20, opacity: 0.9  },
   // Medium mid-layer clouds
-  { top: "15%",  size: 140, duration: 34, delay: -14, opacity: 0.75, sheep: true },
+  { top: "15%",  size: 140, duration: 34, delay: -14, opacity: 0.75 },
   { top: "42%",  size: 150, duration: 38, delay: -25, opacity: 0.7  },
   { top: "65%",  size: 130, duration: 32, delay: -8,  opacity: 0.8  },
   { top: "85%",  size: 160, duration: 36, delay: -30, opacity: 0.65, sheep: true },
   // Smaller distant clouds
   { top: "10%",  size: 100, duration: 46, delay: -18, opacity: 0.5  },
-  { top: "35%",  size: 90,  duration: 50, delay: -35, opacity: 0.45, sheep: true },
+  { top: "35%",  size: 90,  duration: 50, delay: -35, opacity: 0.45 },
   { top: "50%",  size: 110, duration: 44, delay: -40, opacity: 0.5  },
   { top: "78%",  size: 80,  duration: 52, delay: -12, opacity: 0.4  },
 ];
@@ -116,7 +99,6 @@ export default function Home() {
   ]);
   const [fairDice, setFairDice] = useState(false);
   const [friendlyRobber, setFriendlyRobber] = useState(false);
-  const [gameMode, setGameMode] = useState<GameMode>("classic");
   const [turnTimer, setTurnTimer] = useState<TurnTimer>(0);
   const [customVp, setCustomVp] = useState(10);
   const [chatMessages, setChatMessages] = useState<{ sender: string; text: string }[]>([]);
@@ -243,7 +225,7 @@ export default function Home() {
       })),
       fairDice,
       friendlyRobber,
-      gameMode,
+      gameMode: "classic" as const,
       vpToWin,
       turnTimer,
       expansionBoard: isExpansion,
@@ -518,8 +500,8 @@ export default function Home() {
 
                 {/* Style picker dropdown */}
                 {stylePickerOpen === idx && (
-                  <div className="absolute left-0 z-50 w-64 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                    <div className="grid grid-cols-3 gap-1">
+                  <div className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                    <div className="grid grid-cols-2 gap-1">
                       {BUILDING_STYLES.map((s) => {
                         const isCurrent = (buildingStyles[idx] ?? DEFAULT_BUILDING_STYLE) === s;
                         return (
@@ -600,29 +582,6 @@ export default function Home() {
                       onClick={() => { if (timerIdx < TURN_TIMER_OPTIONS.length - 1) { playClick(); setTurnTimer(TURN_TIMER_OPTIONS[timerIdx + 1]); } }}
                     >
                       &gt;
-                    </button>
-                  </div>
-                </div>
-
-                {/* Game Mode */}
-                <div className="text-center">
-                  <span className="font-pixel text-[8px] text-gray-600 block mb-1">MODE</span>
-                  <div className="flex justify-center">
-                    <button
-                      className={`px-3 py-1 font-pixel text-[7px] border-2 border-black border-r-0 ${
-                        gameMode === "classic" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"
-                      }`}
-                      onClick={() => { playClick(); setGameMode("classic"); }}
-                    >
-                      CLASSIC
-                    </button>
-                    <button
-                      className={`px-3 py-1 font-pixel text-[7px] border-2 border-black ${
-                        gameMode === "speed" ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"
-                      }`}
-                      onClick={() => { playClick(); setGameMode("speed"); }}
-                    >
-                      SPEED
                     </button>
                   </div>
                 </div>
