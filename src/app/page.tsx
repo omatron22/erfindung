@@ -10,9 +10,9 @@ import { STYLE_DEFS } from "@/shared/buildingStyles";
 import { StylePreview, RuleCard, PersonalityIcon, PERSONALITY_LABELS } from "@/app/components/ui/LobbyComponents";
 import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
-import { playClick, playNavigate, playError as playErrorSound, startMusic, stopMusic } from "@/app/utils/sounds";
+import { playClick, playNavigate, playError as playErrorSound, startMusic } from "@/app/utils/sounds";
 import AudioControls from "@/app/components/ui/AudioControls";
-import { WoolPixel } from "@/app/components/icons/PixelIcons";
+import CloudLayer from "@/app/components/ui/CloudLayer";
 
 const ALL_COLORS = PLAYER_COLORS;
 const BOT_NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve"];
@@ -21,43 +21,6 @@ function defaultPlayer(name: string, color: string, isBot: boolean): PlayerConfi
   return { name, color, isBot };
 }
 
-/** Blocky 8-bit cloud SVG */
-function PixelCloud({ size = 80, color = "white" }: { size?: number; color?: string }) {
-  const s = size / 80;
-  return (
-    <svg width={80 * s} height={40 * s} viewBox="0 0 80 40" shapeRendering="crispEdges">
-      <rect x="20" y="0"  width="16" height="8" fill={color} />
-      <rect x="44" y="4"  width="12" height="8" fill={color} />
-      <rect x="8"  y="8"  width="60" height="8" fill={color} />
-      <rect x="4"  y="16" width="72" height="8" fill={color} />
-      <rect x="12" y="24" width="56" height="8" fill={color} />
-      <rect x="20" y="32" width="40" height="8" fill={color} />
-    </svg>
-  );
-}
-
-/** Sheep cloud — uses the existing WoolPixel (sheep icon) scaled up */
-function PixelSheepCloud({ size = 80 }: { size?: number; color?: string }) {
-  return <WoolPixel size={size} color="white" />;
-}
-
-const CLOUDS: { top: string; size: number; duration: number; delay: number; opacity: number; sheep?: boolean }[] = [
-  // Large foreground clouds
-  { top: "4%",   size: 220, duration: 26, delay: -3,  opacity: 1    },
-  { top: "55%",  size: 200, duration: 30, delay: -10, opacity: 0.95, sheep: true },
-  { top: "28%",  size: 180, duration: 22, delay: -6,  opacity: 1    },
-  { top: "72%",  size: 190, duration: 28, delay: -20, opacity: 0.9  },
-  // Medium mid-layer clouds
-  { top: "15%",  size: 140, duration: 34, delay: -14, opacity: 0.75 },
-  { top: "42%",  size: 150, duration: 38, delay: -25, opacity: 0.7  },
-  { top: "65%",  size: 130, duration: 32, delay: -8,  opacity: 0.8  },
-  { top: "85%",  size: 160, duration: 36, delay: -30, opacity: 0.65, sheep: true },
-  // Smaller distant clouds
-  { top: "10%",  size: 100, duration: 46, delay: -18, opacity: 0.5  },
-  { top: "35%",  size: 90,  duration: 50, delay: -35, opacity: 0.45 },
-  { top: "50%",  size: 110, duration: 44, delay: -40, opacity: 0.5  },
-  { top: "78%",  size: 80,  duration: 52, delay: -12, opacity: 0.4  },
-];
 
 export default function Home() {
   const router = useRouter();
@@ -220,14 +183,6 @@ export default function Home() {
     router.push("/game/hotseat");
   }
 
-  // Clean up any stale session when returning to home page
-  useEffect(() => {
-    if (mpStore.roomCode) {
-      socket?.emit("room:leave-game", {});
-      mpStore.reset();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Socket event listeners for online lobby
   useEffect(() => {
     if (!socket) return;
@@ -268,29 +223,10 @@ export default function Home() {
     socket.emit("room:join", { roomCode: joinCode.trim().toUpperCase(), playerName: name });
   }
 
-  const cloudLayer = (
-    <>
-      {CLOUDS.map((c, i) => (
-        <div
-          key={i}
-          className="cloud absolute pointer-events-none"
-          style={{
-            top: c.top,
-            animationDuration: `${c.duration}s`,
-            animationDelay: `${c.delay}s`,
-            opacity: c.opacity,
-          }}
-        >
-          {c.sheep ? <PixelSheepCloud size={c.size} /> : <PixelCloud size={c.size} />}
-        </div>
-      ))}
-    </>
-  );
-
   if (!showLobby) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-[#2a6ab5] overflow-hidden relative">
-        {cloudLayer}
+        <CloudLayer />
 
         {/* Audio controls */}
         <AudioControls className="absolute top-4 right-4 z-20" />
@@ -327,7 +263,7 @@ export default function Home() {
 
   return (
     <main className="h-screen flex flex-col bg-[#2a6ab5] overflow-hidden relative">
-      {cloudLayer}
+      <CloudLayer />
 
       <button
         onClick={() => { playClick(); setShowLobby(false); }}

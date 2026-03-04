@@ -23,6 +23,7 @@ import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS
 import { STYLE_DEFS } from "@/shared/buildingStyles";
 import type { HexKey } from "@/shared/types/coordinates";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
+import CloudLayer from "@/app/components/ui/CloudLayer";
 
 export default function OnlineGamePage() {
   const router = useRouter();
@@ -232,6 +233,7 @@ export default function OnlineGamePage() {
 
     return (
       <div className="h-screen flex flex-col bg-[#2a6ab5] overflow-hidden relative">
+        <CloudLayer />
         <button
           onClick={handleLeaveGame}
           className="absolute top-4 left-4 z-20 font-pixel text-[9px] text-white/70 hover:text-white"
