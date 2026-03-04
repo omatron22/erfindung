@@ -240,14 +240,14 @@ export default function OnlineGamePage() {
   // Waiting for room data (store propagating from home page navigation)
   if (!roomCode || myPlayerIndex === null) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center bg-[#2a6ab5] gap-4">
-        <div className="font-pixel text-[12px] text-[#8BC34A] animate-pulse">CONNECTING...</div>
+      <div className="h-screen flex items-center justify-center bg-[#2a6ab5] relative">
         <button
           onClick={() => router.push("/")}
-          className="font-pixel text-[9px] text-white/60 hover:text-white"
+          className="absolute top-4 left-4 z-20 font-pixel text-[9px] text-white/70 hover:text-white"
         >
-          &larr; BACK TO MENU
+          &larr; BACK
         </button>
+        <div className="font-pixel text-[12px] text-[#8BC34A] animate-pulse">CONNECTING...</div>
       </div>
     );
   }

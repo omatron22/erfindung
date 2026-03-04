@@ -184,15 +184,13 @@ export default function Home() {
   }
 
   // Socket event listeners for online lobby
-  // IMPORTANT: only depend on [socket] — not mpStore/router, which change often
-  // and would cause listener detach/reattach races where events get missed
+  // Socket callbacks only update the store — navigation happens in the effect below
   useEffect(() => {
     if (!socket) return;
 
     const onJoined = ({ roomCode, playerIndex, reconnectToken }: { roomCode: string; playerIndex: number; reconnectToken: string }) => {
       useMultiplayerStore.getState().setRoomJoined(roomCode, playerIndex, reconnectToken);
       setCreating(false);
-      router.push("/game/online");
     };
 
     const onError = ({ message }: { message: string }) => {
@@ -208,6 +206,15 @@ export default function Home() {
       socket.off("game:error", onError);
     };
   }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Navigate to online page when room is joined (triggered by store update, not socket callback)
+  const onlineRoomCode = useMultiplayerStore((s) => s.roomCode);
+  useEffect(() => {
+    if (creating && onlineRoomCode) {
+      setCreating(false);
+      router.push("/game/online");
+    }
+  }, [creating, onlineRoomCode, router]);
 
   function createRoom() {
     const name = players[0].name.trim() || "Player";
