@@ -284,11 +284,11 @@ export default function OnlineGamePage() {
         {/* Main layout: 3-column on desktop, vertical scroll on mobile */}
         <div className="relative z-10 flex flex-col md:flex-row flex-1 min-h-0 md:items-center px-3 md:px-0 overflow-y-auto md:overflow-y-hidden pb-4 md:pb-0 gap-3 md:gap-0">
           {/* LEFT — Players */}
-          <div className="w-full md:w-60 shrink-0 bg-[#f0e6d0] pixel-border md:ml-3 flex flex-col max-h-[60vh] md:h-[440px]">
+          <div className="w-full md:w-60 shrink-0 bg-[#f0e6d0] pixel-border md:ml-3 flex flex-col md:h-[440px]">
             <div className="px-4 pt-3 pb-2">
               <h2 className="font-pixel text-[9px] text-gray-700">PLAYERS ({lobbyPlayers.length}/{isExpansion ? 6 : 4})</h2>
             </div>
-            <div className="px-4 space-y-2 overflow-y-auto flex-1">
+            <div className="px-4 space-y-2 md:overflow-y-auto flex-1">
               {lobbyPlayers.map((player) => {
                 const isMe = player.index === myPlayerIndex;
                 const canEditBot = isHost && player.isBot;

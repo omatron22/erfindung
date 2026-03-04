@@ -121,11 +121,13 @@ export default function HexTile({ hex, size, onClick, highlighted, flashing, fla
         const ry = center.y - robberSize / 2;
         return (
           <g>
+            {/* Dark backdrop circle for contrast */}
+            <circle cx={center.x} cy={center.y} r={robberSize * 0.55} fill="rgba(0,0,0,0.6)" stroke="#000" strokeWidth={1.5} />
             <foreignObject x={rx} y={ry} width={robberSize} height={robberSize}>
               <div
                 style={{ width: robberSize, height: robberSize, display: "flex", alignItems: "center", justifyContent: "center" }}
               >
-                <RobberIcon size={robberSize * 0.8} color="#2d1b4e" />
+                <RobberIcon size={robberSize * 0.8} color="#e74c3c" />
               </div>
             </foreignObject>
           </g>
