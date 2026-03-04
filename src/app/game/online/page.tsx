@@ -24,7 +24,8 @@ import { STYLE_DEFS } from "@/shared/buildingStyles";
 import type { HexKey } from "@/shared/types/coordinates";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import CloudLayer from "@/app/components/ui/CloudLayer";
-import { loadPreferences, savePreferences } from "@/app/utils/preferences";
+import { loadPreferences } from "@/app/utils/preferences";
+import SettingsDropdown from "@/app/components/ui/SettingsDropdown";
 
 export default function OnlineGamePage() {
   const router = useRouter();
@@ -225,11 +226,11 @@ export default function OnlineGamePage() {
   function handleRemoveBot(playerIndex: number) { socket?.emit("room:remove-bot", { playerIndex }); }
   function handleStartGameClick() { socket?.emit("room:start-game", {}); }
   function handleUpdateConfig(config: Partial<LobbyConfig>) { socket?.emit("room:update-config", { config }); }
-  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); savePreferences({ color }); setColorPickerOpen(null); }
+  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); setColorPickerOpen(null); }
   function handleBotPickColor(playerIndex: number, color: string) { socket?.emit("room:update-bot", { playerIndex, color }); setColorPickerOpen(null); }
   function handleSaveBotName(playerIndex: number) { socket?.emit("room:update-bot", { playerIndex, name: editingBotName }); setEditingBotNameIdx(null); }
-  function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); savePreferences({ buildingStyle: style }); setStylePickerOpen(null); }
-  function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); savePreferences({ name }); }
+  function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); setStylePickerOpen(null); }
+  function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); }
   function handleLeaveGame() { socket?.emit("room:leave-game", {}); mpStore.reset(); router.push("/"); }
   function sendLobbyChat() {
     if (!socket || !lobbyChatInput.trim()) return;
@@ -272,6 +273,15 @@ export default function OnlineGamePage() {
         >
           &larr; LEAVE
         </button>
+
+        <SettingsDropdown
+          className="absolute top-4 right-4 z-20"
+          onChange={(prefs) => {
+            if (prefs.name !== undefined) socket?.emit("room:update-player", { name: prefs.name });
+            if (prefs.color !== undefined) socket?.emit("room:update-player", { color: prefs.color });
+            if (prefs.buildingStyle !== undefined) socket?.emit("room:update-player", { buildingStyle: prefs.buildingStyle });
+          }}
+        />
 
         {/* Room code header */}
         <div className="relative z-10 w-full pt-10 pb-2">

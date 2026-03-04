@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { loadPreferences } from "@/app/utils/preferences";
+import SettingsDropdown from "@/app/components/ui/SettingsDropdown";
 
 export default function JoinPage() {
   const params = useParams();
@@ -69,7 +70,8 @@ export default function JoinPage() {
   }
 
   return (
-    <main className="min-h-safe-screen flex items-center justify-center bg-[#2a6ab5] px-4">
+    <main className="min-h-safe-screen flex items-center justify-center bg-[#2a6ab5] px-4 relative">
+      <SettingsDropdown className="absolute top-4 right-4 z-20" />
       <div className="bg-[#f0e6d0] pixel-border p-6 md:p-8 w-full max-w-80 text-center relative">
         <button
           onClick={() => router.push("/")}

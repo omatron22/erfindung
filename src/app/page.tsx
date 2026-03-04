@@ -11,9 +11,9 @@ import { StylePreview, RuleCard, PersonalityIcon, PERSONALITY_LABELS } from "@/a
 import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { playClick, playNavigate, playError as playErrorSound, startMusic } from "@/app/utils/sounds";
-import AudioControls from "@/app/components/ui/AudioControls";
+import SettingsDropdown from "@/app/components/ui/SettingsDropdown";
 import CloudLayer from "@/app/components/ui/CloudLayer";
-import { loadPreferences, savePreferences } from "@/app/utils/preferences";
+import { loadPreferences } from "@/app/utils/preferences";
 
 const ALL_COLORS = PLAYER_COLORS;
 const BOT_NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve"];
@@ -148,14 +148,12 @@ export default function Home() {
     } else {
       updatePlayer(playerIdx, { color });
     }
-    if (playerIdx === 0) savePreferences({ color });
     setColorPickerOpen(null);
   }
 
   function pickStyle(playerIdx: number, style: BuildingStyle) {
     playClick();
     setBuildingStyles((prev) => ({ ...prev, [playerIdx]: style }));
-    if (playerIdx === 0) savePreferences({ buildingStyle: style });
     setStylePickerOpen(null);
   }
 
@@ -268,8 +266,8 @@ export default function Home() {
       <main className="min-h-safe-screen flex items-center justify-center bg-[#2a6ab5] overflow-hidden relative px-4">
         <CloudLayer />
 
-        {/* Audio controls */}
-        <AudioControls className="absolute top-4 right-4 z-20" />
+        {/* Settings gear */}
+        <SettingsDropdown className="absolute top-4 right-4 z-20" />
 
         {/* Title + play button */}
         <div className="relative z-10 flex flex-col items-center">
@@ -313,8 +311,31 @@ export default function Home() {
         &larr; BACK
       </button>
 
-      {/* Audio controls */}
-      <AudioControls className="absolute top-4 right-4 z-20" />
+      {/* Settings gear */}
+      <SettingsDropdown
+        className="absolute top-4 right-4 z-20"
+        onChange={(prefs) => {
+          if (prefs.name !== undefined || prefs.color !== undefined) {
+            setPlayers((prev) => {
+              const updated = [...prev];
+              const p0 = { ...updated[0] };
+              if (prefs.name !== undefined) p0.name = prefs.name;
+              if (prefs.color !== undefined) {
+                const conflictIdx = updated.findIndex((p, i) => i !== 0 && p.color === prefs.color);
+                if (conflictIdx !== -1) {
+                  updated[conflictIdx] = { ...updated[conflictIdx], color: p0.color };
+                }
+                p0.color = prefs.color;
+              }
+              updated[0] = p0;
+              return updated;
+            });
+          }
+          if (prefs.buildingStyle) {
+            setBuildingStyles((prev) => ({ ...prev, [0]: prefs.buildingStyle as BuildingStyle }));
+          }
+        }}
+      />
 
       {/* Main layout: 3-column on desktop, vertical scroll on mobile */}
       <div className="relative z-10 flex flex-col md:flex-row flex-1 min-h-0 md:items-center px-3 md:px-0 overflow-y-auto md:overflow-y-hidden pt-10 md:pt-0 pb-4 md:pb-0 gap-3 md:gap-0">
@@ -350,8 +371,8 @@ export default function Home() {
                       type="text"
                       value={player.name}
                       onChange={(e) => updatePlayer(idx, { name: e.target.value })}
-                      onBlur={() => { setEditingNameIdx(null); if (idx === 0) savePreferences({ name: player.name }); }}
-                      onKeyDown={(e) => { if (e.key === "Enter") { setEditingNameIdx(null); if (idx === 0) savePreferences({ name: player.name }); } }}
+                      onBlur={() => { setEditingNameIdx(null); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { setEditingNameIdx(null); } }}
                       placeholder={idx === 0 ? "Your name..." : "Bot name..."}
                       className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
                       autoFocus
