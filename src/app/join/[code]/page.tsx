@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
+import { loadPreferences } from "@/app/utils/preferences";
 
 export default function JoinPage() {
   const params = useParams();
@@ -11,7 +12,7 @@ export default function JoinPage() {
   const code = (params.code as string)?.toUpperCase();
   const { socket, connected } = useSocket();
   const { roomCode, setRoomJoined, setError, error } = useMultiplayerStore();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => loadPreferences()?.name ?? "");
   const [joining, setJoining] = useState(false);
 
   // Listen for join response

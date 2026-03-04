@@ -13,6 +13,7 @@ import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { playClick, playNavigate, playError as playErrorSound, startMusic } from "@/app/utils/sounds";
 import AudioControls from "@/app/components/ui/AudioControls";
 import CloudLayer from "@/app/components/ui/CloudLayer";
+import { loadPreferences, savePreferences } from "@/app/utils/preferences";
 
 const ALL_COLORS = PLAYER_COLORS;
 const BOT_NAMES = ["Alice", "Bob", "Carol", "Dave", "Eve"];
@@ -72,6 +73,29 @@ export default function Home() {
     };
   }, []);
 
+  // Load saved preferences on mount
+  useEffect(() => {
+    const prefs = loadPreferences();
+    if (!prefs) return;
+    setPlayers((prev) => {
+      const updated = [...prev];
+      const p0 = { ...updated[0] };
+      if (prefs.name) p0.name = prefs.name;
+      if (prefs.color) {
+        const conflictIdx = updated.findIndex((p, i) => i !== 0 && p.color === prefs.color);
+        if (conflictIdx !== -1) {
+          updated[conflictIdx] = { ...updated[conflictIdx], color: p0.color };
+        }
+        p0.color = prefs.color;
+      }
+      updated[0] = p0;
+      return updated;
+    });
+    if (prefs.buildingStyle) {
+      setBuildingStyles((prev) => ({ ...prev, [0]: prefs.buildingStyle as BuildingStyle }));
+    }
+  }, []);
+
   const [expansionBoard, setExpansionBoard] = useState(false);
   const vpToWin = customVp;
 
@@ -124,12 +148,14 @@ export default function Home() {
     } else {
       updatePlayer(playerIdx, { color });
     }
+    if (playerIdx === 0) savePreferences({ color });
     setColorPickerOpen(null);
   }
 
   function pickStyle(playerIdx: number, style: BuildingStyle) {
     playClick();
     setBuildingStyles((prev) => ({ ...prev, [playerIdx]: style }));
+    if (playerIdx === 0) savePreferences({ buildingStyle: style });
     setStylePickerOpen(null);
   }
 
@@ -324,8 +350,8 @@ export default function Home() {
                       type="text"
                       value={player.name}
                       onChange={(e) => updatePlayer(idx, { name: e.target.value })}
-                      onBlur={() => setEditingNameIdx(null)}
-                      onKeyDown={(e) => { if (e.key === "Enter") setEditingNameIdx(null); }}
+                      onBlur={() => { setEditingNameIdx(null); if (idx === 0) savePreferences({ name: player.name }); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { setEditingNameIdx(null); if (idx === 0) savePreferences({ name: player.name }); } }}
                       placeholder={idx === 0 ? "Your name..." : "Bot name..."}
                       className="flex-1 bg-white px-2 py-0.5 text-[10px] text-gray-800 border border-gray-400 focus:outline-none min-w-0"
                       autoFocus

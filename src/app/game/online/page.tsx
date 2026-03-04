@@ -24,6 +24,7 @@ import { STYLE_DEFS } from "@/shared/buildingStyles";
 import type { HexKey } from "@/shared/types/coordinates";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import CloudLayer from "@/app/components/ui/CloudLayer";
+import { loadPreferences, savePreferences } from "@/app/utils/preferences";
 
 export default function OnlineGamePage() {
   const router = useRouter();
@@ -224,11 +225,11 @@ export default function OnlineGamePage() {
   function handleRemoveBot(playerIndex: number) { socket?.emit("room:remove-bot", { playerIndex }); }
   function handleStartGameClick() { socket?.emit("room:start-game", {}); }
   function handleUpdateConfig(config: Partial<LobbyConfig>) { socket?.emit("room:update-config", { config }); }
-  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); setColorPickerOpen(null); }
+  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); savePreferences({ color }); setColorPickerOpen(null); }
   function handleBotPickColor(playerIndex: number, color: string) { socket?.emit("room:update-bot", { playerIndex, color }); setColorPickerOpen(null); }
   function handleSaveBotName(playerIndex: number) { socket?.emit("room:update-bot", { playerIndex, name: editingBotName }); setEditingBotNameIdx(null); }
-  function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); setStylePickerOpen(null); }
-  function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); }
+  function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); savePreferences({ buildingStyle: style }); setStylePickerOpen(null); }
+  function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); savePreferences({ name }); }
   function handleLeaveGame() { socket?.emit("room:leave-game", {}); mpStore.reset(); router.push("/"); }
   function sendLobbyChat() {
     if (!socket || !lobbyChatInput.trim()) return;
