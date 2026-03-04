@@ -8,6 +8,7 @@ export interface LobbyConfig {
   gameMode: GameMode;
   vpToWin: number;
   turnTimer: TurnTimer;
+  expansionBoard: boolean;
 }
 
 // Client → Server messages

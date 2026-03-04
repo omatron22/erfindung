@@ -134,6 +134,7 @@ export interface GameState {
   pendingTrade: TradeOffer | null;
   discardingPlayers: number[]; // player indices who still need to discard
   setupPlacementsMade: number; // tracks setup progress
+  startingPlayerIndex: number; // randomized first player
   winner: number | null;
   longestRoadHolder: number | null;
   largestArmyHolder: number | null;

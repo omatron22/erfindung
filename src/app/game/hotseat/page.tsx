@@ -365,7 +365,7 @@ export default function GamePage() {
     const isSetup = gameState.phase === "setup-forward" || gameState.phase === "setup-reverse";
     const SETUP_TIMER = 30;
 
-    if (isSetup && isHumanTurn) {
+    if (isSetup && isHumanTurn && fullConfig?.turnTimer) {
       const deadline = Date.now() + SETUP_TIMER * 1000;
       setTurnDeadline(deadline);
 
@@ -805,8 +805,8 @@ export default function GamePage() {
         buildingStyles={boardBuildingStyles}
         chatLog={gameState.log}
         onSendChat={handleSendChat}
-        onMainMenu={() => router.push("/")}
-        onLobby={() => { sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
+        onMainMenu={() => { sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-config"); router.push("/"); }}
+        onLobby={() => { sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-config"); sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
         flashingHexes={flashingHexes}
         flashSeven={flashSeven}
         turnDeadline={turnDeadline}

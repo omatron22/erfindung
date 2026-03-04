@@ -14,6 +14,7 @@ const DEFAULT_LOBBY_CONFIG: LobbyConfig = {
   gameMode: "classic",
   vpToWin: 10,
   turnTimer: 0,
+  expansionBoard: false,
 };
 
 const rooms = new Map<string, Room>();

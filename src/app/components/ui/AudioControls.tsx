@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { isMusicMuted, setMusicMuted, isSfxMuted, setSfxMuted, playClick } from "@/app/utils/sounds";
+import {
+  isMusicMuted, setMusicMuted,
+  setSfxMuted, playClick,
+  getMasterVolume, setMasterVolume, updateMusicVolume,
+} from "@/app/utils/sounds";
 
 /** Pixel-art music note icon */
 function MusicIcon({ muted, size = 16 }: { muted: boolean; size?: number }) {
@@ -28,38 +32,9 @@ function MusicIcon({ muted, size = 16 }: { muted: boolean; size?: number }) {
   );
 }
 
-/** Pixel-art speaker icon */
-function SpeakerIcon({ muted, size = 16 }: { muted: boolean; size?: number }) {
-  const color = muted ? "#666" : "#fbbf24";
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" shapeRendering="crispEdges">
-      {/* Speaker body */}
-      <rect x="2" y="5" width="3" height="6" fill={color} />
-      <rect x="5" y="3" width="2" height="10" fill={color} />
-      <rect x="7" y="1" width="2" height="14" fill={color} />
-      {/* Sound waves or X */}
-      {muted ? (
-        <>
-          <rect x="11" y="4" width="2" height="2" fill="#ef4444" />
-          <rect x="13" y="6" width="2" height="2" fill="#ef4444" />
-          <rect x="11" y="8" width="2" height="2" fill="#ef4444" />
-          <rect x="13" y="4" width="2" height="2" fill="#ef4444" />
-          <rect x="11" y="6" width="2" height="2" fill="#ef4444" />
-          <rect x="13" y="8" width="2" height="2" fill="#ef4444" />
-        </>
-      ) : (
-        <>
-          <rect x="11" y="5" width="1" height="6" fill={color} />
-          <rect x="13" y="3" width="1" height="10" fill={color} />
-        </>
-      )}
-    </svg>
-  );
-}
-
 export default function AudioControls({ className = "" }: { className?: string }) {
   const [musicOff, setMusicOff] = useState(isMusicMuted);
-  const [sfxOff, setSfxOff] = useState(isSfxMuted);
+  const [vol, setVol] = useState(getMasterVolume);
 
   const toggleMusic = useCallback(() => {
     const next = !musicOff;
@@ -68,12 +43,13 @@ export default function AudioControls({ className = "" }: { className?: string }
     if (!next) playClick();
   }, [musicOff]);
 
-  const toggleSfx = useCallback(() => {
-    const next = !sfxOff;
-    setSfxOff(next);
-    setSfxMuted(next);
-    if (!next) playClick();
-  }, [sfxOff]);
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value);
+    setVol(v);
+    setMasterVolume(v);
+    updateMusicVolume();
+    setSfxMuted(v === 0);
+  }, []);
 
   return (
     <div className={`flex items-center gap-1 ${className}`}>
@@ -84,13 +60,15 @@ export default function AudioControls({ className = "" }: { className?: string }
       >
         <MusicIcon muted={musicOff} />
       </button>
-      <button
-        onClick={toggleSfx}
-        className="w-8 h-8 flex items-center justify-center bg-black/40 hover:bg-black/60 border border-white/20 transition-colors cursor-pointer"
-        title={sfxOff ? "Sound: OFF" : "Sound: ON"}
-      >
-        <SpeakerIcon muted={sfxOff} />
-      </button>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        value={vol}
+        onChange={handleVolumeChange}
+        className="w-16 h-1.5 accent-amber-400 cursor-pointer"
+        title={`Volume: ${vol}%`}
+      />
     </div>
   );
 }

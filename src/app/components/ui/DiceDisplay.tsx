@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { DiceRoll } from "@/shared/types/game";
-import { playDiceRoll } from "@/app/utils/sounds";
-
 interface Props {
   roll: DiceRoll | null;
   canRoll: boolean;
@@ -55,7 +53,6 @@ export default function DiceDisplay({ roll, canRoll, onRoll }: Props) {
     if (!canRoll || isRolling) return;
 
     setIsRolling(true);
-    playDiceRoll();
 
     // Cycle random values every 80ms
     intervalRef.current = setInterval(() => {

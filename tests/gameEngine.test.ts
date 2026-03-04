@@ -132,7 +132,7 @@ describe("Game Creation", () => {
     const state = createGame("test", ["Alice", "Bob", "Carol", "Dave"]);
     expect(state.players).toHaveLength(4);
     expect(state.phase).toBe("setup-forward");
-    expect(state.currentPlayerIndex).toBe(0);
+    expect(state.currentPlayerIndex).toBe(state.startingPlayerIndex);
     expect(state.players[0].name).toBe("Alice");
     expect(state.developmentCardDeck).toHaveLength(25);
   });
@@ -154,34 +154,38 @@ describe("Setup Phase", () => {
   });
 
   it("allows first player to place a settlement", () => {
+    const firstPlayer = state.currentPlayerIndex;
     const vertex = getFirstValidSetupVertex(state);
     const result = applyAction(state, {
       type: "place-settlement",
-      playerIndex: 0,
+      playerIndex: firstPlayer,
       vertex,
     });
     expect(result.valid).toBe(true);
     expect(result.newState!.board.vertices[vertex]).toEqual({
       type: "settlement",
-      playerIndex: 0,
+      playerIndex: firstPlayer,
     });
-    expect(result.newState!.players[0].victoryPoints).toBe(1);
+    expect(result.newState!.players[firstPlayer].victoryPoints).toBe(1);
   });
 
   it("rejects settlement from wrong player", () => {
+    const firstPlayer = state.currentPlayerIndex;
+    const wrongPlayer = (firstPlayer + 1) % state.players.length;
     const vertex = getFirstValidSetupVertex(state);
     const result = applyAction(state, {
       type: "place-settlement",
-      playerIndex: 1,
+      playerIndex: wrongPlayer,
       vertex,
     });
     expect(result.valid).toBe(false);
   });
 
   it("rejects road before settlement in setup", () => {
+    const firstPlayer = state.currentPlayerIndex;
     const result = applyAction(state, {
       type: "place-road",
-      playerIndex: 0,
+      playerIndex: firstPlayer,
       edge: Object.keys(state.board.edges)[0],
     });
     expect(result.valid).toBe(false);
@@ -191,7 +195,7 @@ describe("Setup Phase", () => {
     const afterSetup = playThroughSetup(state);
     expect(afterSetup.phase).toBe("main");
     expect(afterSetup.turnPhase).toBe("roll");
-    expect(afterSetup.currentPlayerIndex).toBe(0);
+    expect(afterSetup.currentPlayerIndex).toBe(afterSetup.startingPlayerIndex);
     for (const p of afterSetup.players) {
       expect(p.settlements).toHaveLength(2);
       expect(p.roads).toHaveLength(2);
@@ -218,7 +222,8 @@ describe("Main Phase - Dice Rolling", () => {
   });
 
   it("allows current player to roll dice", () => {
-    const result = applyAction(state, { type: "roll-dice", playerIndex: 0 });
+    const cp = state.currentPlayerIndex;
+    const result = applyAction(state, { type: "roll-dice", playerIndex: cp });
     expect(result.valid).toBe(true);
     expect(result.newState!.lastDiceRoll).not.toBeNull();
     expect(result.newState!.lastDiceRoll!.total).toBeGreaterThanOrEqual(2);
@@ -226,15 +231,18 @@ describe("Main Phase - Dice Rolling", () => {
   });
 
   it("rejects dice roll from wrong player", () => {
-    const result = applyAction(state, { type: "roll-dice", playerIndex: 1 });
+    const cp = state.currentPlayerIndex;
+    const wrong = (cp + 1) % state.players.length;
+    const result = applyAction(state, { type: "roll-dice", playerIndex: wrong });
     expect(result.valid).toBe(false);
   });
 
   it("rejects double dice roll", () => {
-    const result1 = applyAction(state, { type: "roll-dice", playerIndex: 0 });
+    const cp = state.currentPlayerIndex;
+    const result1 = applyAction(state, { type: "roll-dice", playerIndex: cp });
     expect(result1.valid).toBe(true);
     if (result1.newState!.turnPhase === "trade-or-build") {
-      const result2 = applyAction(result1.newState!, { type: "roll-dice", playerIndex: 0 });
+      const result2 = applyAction(result1.newState!, { type: "roll-dice", playerIndex: cp });
       expect(result2.valid).toBe(false);
     }
   });
@@ -249,47 +257,50 @@ describe("Main Phase - End Turn", () => {
   });
 
   it("advances to next player on end turn", () => {
-    let result = applyAction(state, { type: "roll-dice", playerIndex: 0 });
+    const cp = state.currentPlayerIndex;
+    let result = applyAction(state, { type: "roll-dice", playerIndex: cp });
     expect(result.valid).toBe(true);
-    let current = handleSevenIfNeeded(result.newState!, 0);
+    let current = handleSevenIfNeeded(result.newState!, cp);
 
-    result = applyAction(current, { type: "end-turn", playerIndex: 0 });
+    result = applyAction(current, { type: "end-turn", playerIndex: cp });
     expect(result.valid).toBe(true);
-    expect(result.newState!.currentPlayerIndex).toBe(1);
+    expect(result.newState!.currentPlayerIndex).toBe((cp + 1) % state.players.length);
     expect(result.newState!.turnPhase).toBe("roll");
   });
 });
 
 describe("Trading", () => {
   let state: GameState;
+  let cp: number;
 
   beforeEach(() => {
     const initial = createGame("test", ["Alice", "Bob", "Carol", "Dave"]);
     state = playThroughSetup(initial);
-    let result = applyAction(state, { type: "roll-dice", playerIndex: 0 });
+    cp = state.currentPlayerIndex;
+    let result = applyAction(state, { type: "roll-dice", playerIndex: cp });
     state = result.newState!;
-    state = handleSevenIfNeeded(state, 0);
+    state = handleSevenIfNeeded(state, cp);
   });
 
   it("allows bank trade with 4:1 ratio", () => {
-    state.players[0].resources.brick = 4;
+    state.players[cp].resources.brick = 4;
     const result = applyAction(state, {
       type: "bank-trade",
-      playerIndex: 0,
+      playerIndex: cp,
       giving: "brick",
       givingCount: 4,
       receiving: "ore",
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].resources.brick).toBe(0);
-    expect(result.newState!.players[0].resources.ore).toBe(state.players[0].resources.ore + 1);
+    expect(result.newState!.players[cp].resources.brick).toBe(0);
+    expect(result.newState!.players[cp].resources.ore).toBe(state.players[cp].resources.ore + 1);
   });
 
   it("rejects bank trade with insufficient resources", () => {
-    state.players[0].resources.brick = 3;
+    state.players[cp].resources.brick = 3;
     const result = applyAction(state, {
       type: "bank-trade",
-      playerIndex: 0,
+      playerIndex: cp,
       giving: "brick",
       givingCount: 4,
       receiving: "ore",
@@ -298,39 +309,39 @@ describe("Trading", () => {
   });
 
   it("allows multi-ratio bank trade (8:2 at 4:1)", () => {
-    state.players[0].resources.brick = 8;
+    state.players[cp].resources.brick = 8;
     const result = applyAction(state, {
       type: "bank-trade",
-      playerIndex: 0,
+      playerIndex: cp,
       giving: "brick",
       givingCount: 8,
       receiving: "ore",
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].resources.brick).toBe(0);
-    expect(result.newState!.players[0].resources.ore).toBe(state.players[0].resources.ore + 2);
+    expect(result.newState!.players[cp].resources.brick).toBe(0);
+    expect(result.newState!.players[cp].resources.ore).toBe(state.players[cp].resources.ore + 2);
   });
 
   it("allows multi-ratio bank trade with port (4:2 at 2:1)", () => {
-    state.players[0].resources.brick = 4;
-    state.players[0].portsAccess = ["brick"];
+    state.players[cp].resources.brick = 4;
+    state.players[cp].portsAccess = ["brick"];
     const result = applyAction(state, {
       type: "bank-trade",
-      playerIndex: 0,
+      playerIndex: cp,
       giving: "brick",
       givingCount: 4,
       receiving: "ore",
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].resources.brick).toBe(0);
-    expect(result.newState!.players[0].resources.ore).toBe(state.players[0].resources.ore + 2);
+    expect(result.newState!.players[cp].resources.brick).toBe(0);
+    expect(result.newState!.players[cp].resources.ore).toBe(state.players[cp].resources.ore + 2);
   });
 
   it("rejects non-multiple bank trade amount", () => {
-    state.players[0].resources.brick = 5;
+    state.players[cp].resources.brick = 5;
     const result = applyAction(state, {
       type: "bank-trade",
-      playerIndex: 0,
+      playerIndex: cp,
       giving: "brick",
       givingCount: 5,
       receiving: "ore",
@@ -341,75 +352,78 @@ describe("Trading", () => {
 
 describe("Development Cards", () => {
   let state: GameState;
+  let cp: number;
 
   beforeEach(() => {
     const initial = createGame("test", ["Alice", "Bob", "Carol", "Dave"]);
     state = playThroughSetup(initial);
-    let result = applyAction(state, { type: "roll-dice", playerIndex: 0 });
+    cp = state.currentPlayerIndex;
+    let result = applyAction(state, { type: "roll-dice", playerIndex: cp });
     state = result.newState!;
-    state = handleSevenIfNeeded(state, 0);
+    state = handleSevenIfNeeded(state, cp);
   });
 
   it("allows buying a development card with resources", () => {
-    state.players[0].resources.ore = 1;
-    state.players[0].resources.grain = 1;
-    state.players[0].resources.wool = 1;
+    state.players[cp].resources.ore = 1;
+    state.players[cp].resources.grain = 1;
+    state.players[cp].resources.wool = 1;
     const result = applyAction(state, {
       type: "buy-development-card",
-      playerIndex: 0,
+      playerIndex: cp,
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].newDevelopmentCards).toHaveLength(1);
+    expect(result.newState!.players[cp].newDevelopmentCards).toHaveLength(1);
     expect(result.newState!.developmentCardDeck.length).toBe(state.developmentCardDeck.length - 1);
   });
 
   it("knight moves to robber-place phase", () => {
-    state.players[0].developmentCards = ["knight"];
+    state.players[cp].developmentCards = ["knight"];
     const result = applyAction(state, {
       type: "play-knight",
-      playerIndex: 0,
+      playerIndex: cp,
     });
     expect(result.valid).toBe(true);
     expect(result.newState!.turnPhase).toBe("robber-place");
-    expect(result.newState!.players[0].knightsPlayed).toBe(1);
+    expect(result.newState!.players[cp].knightsPlayed).toBe(1);
   });
 
   it("monopoly takes all of chosen resource", () => {
-    state.players[0].developmentCards = ["monopoly"];
-    state.players[1].resources.grain = 3;
-    state.players[2].resources.grain = 2;
-    state.players[3].resources.grain = 1;
-    const startGrain = state.players[0].resources.grain;
+    const others = state.players.filter((_, i) => i !== cp);
+    state.players[cp].developmentCards = ["monopoly"];
+    others[0].resources.grain = 3;
+    others[1].resources.grain = 2;
+    others[2].resources.grain = 1;
+    const startGrain = state.players[cp].resources.grain;
     const result = applyAction(state, {
       type: "play-monopoly",
-      playerIndex: 0,
+      playerIndex: cp,
       resource: "grain",
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].resources.grain).toBe(startGrain + 6);
-    expect(result.newState!.players[1].resources.grain).toBe(0);
-    expect(result.newState!.players[2].resources.grain).toBe(0);
-    expect(result.newState!.players[3].resources.grain).toBe(0);
+    expect(result.newState!.players[cp].resources.grain).toBe(startGrain + 6);
+    for (const other of others) {
+      expect(result.newState!.players[other.index].resources.grain).toBe(0);
+    }
   });
 
   it("year of plenty gives 2 resources", () => {
-    state.players[0].developmentCards = ["yearOfPlenty"];
-    const startOre = state.players[0].resources.ore;
-    const startGrain = state.players[0].resources.grain;
+    state.players[cp].developmentCards = ["yearOfPlenty"];
+    const startOre = state.players[cp].resources.ore;
+    const startGrain = state.players[cp].resources.grain;
     const result = applyAction(state, {
       type: "play-year-of-plenty",
-      playerIndex: 0,
+      playerIndex: cp,
       resource1: "ore",
       resource2: "grain",
     });
     expect(result.valid).toBe(true);
-    expect(result.newState!.players[0].resources.ore).toBe(startOre + 1);
-    expect(result.newState!.players[0].resources.grain).toBe(startGrain + 1);
+    expect(result.newState!.players[cp].resources.ore).toBe(startOre + 1);
+    expect(result.newState!.players[cp].resources.grain).toBe(startGrain + 1);
   });
 
   it("rejects playing two dev cards in one turn", () => {
-    state.players[0].developmentCards = ["knight", "monopoly"];
-    let result = applyAction(state, { type: "play-knight", playerIndex: 0 });
+    state.players[cp].developmentCards = ["knight", "monopoly"];
+    let result = applyAction(state, { type: "play-knight", playerIndex: cp });
     expect(result.valid).toBe(true);
 
     const newHex = Object.keys(result.newState!.board.hexes).find(
@@ -417,7 +431,7 @@ describe("Development Cards", () => {
     )!;
     result = applyAction(result.newState!, {
       type: "move-robber",
-      playerIndex: 0,
+      playerIndex: cp,
       hex: newHex,
     });
     let current = result.newState!;
@@ -425,7 +439,7 @@ describe("Development Cards", () => {
 
     result = applyAction(current, {
       type: "play-monopoly",
-      playerIndex: 0,
+      playerIndex: cp,
       resource: "brick",
     });
     expect(result.valid).toBe(false);

@@ -677,7 +677,9 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
 
             {/* Existing dev cards (clickable to play) */}
             {myDevCards.map((card: DevelopmentCardType, i: number) => {
-              const isPlayable = canTradeOrBuild && !myPlayer.hasPlayedDevCardThisTurn && card !== "victoryPoint";
+              const canPlayDevCard = gameState.phase === "main" && isMyTurn &&
+                (gameState.turnPhase === "trade-or-build" || gameState.turnPhase === "roll");
+              const isPlayable = canPlayDevCard && !myPlayer.hasPlayedDevCardThisTurn && card !== "victoryPoint";
               return (
                 <div key={`dev-${i}`} className="relative group">
                   <button
@@ -718,7 +720,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                       </span>
                     )}
                   </button>
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-50 pointer-events-none">
+                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-50 pointer-events-none">
                     <div className="bg-[#1a1a2e] border-2 border-purple-500 px-2 py-1 whitespace-nowrap" style={{ boxShadow: "2px 2px 0 #000" }}>
                       <span className="font-pixel text-[6px] text-purple-200">{formatDevCard(card)}</span>
                     </div>

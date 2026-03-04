@@ -70,7 +70,7 @@ export default function Home() {
     };
   }, []);
 
-  const isExpansion = players.length >= 5;
+  const [expansionBoard, setExpansionBoard] = useState(false);
   const vpToWin = customVp;
 
   // Close color picker on outside click
@@ -89,7 +89,8 @@ export default function Home() {
   const usedColors = new Set(players.map((p) => p.color));
 
   function addBot() {
-    if (players.length >= 6) return;
+    const maxPlayers = expansionBoard ? 6 : 4;
+    if (players.length >= maxPlayers) return;
     playClick();
     const usedNames = new Set(players.map((p) => p.name));
     const name = BOT_NAMES.find((n) => !usedNames.has(n)) ?? `Bot ${players.length}`;
@@ -171,7 +172,7 @@ export default function Home() {
       gameMode: "classic" as const,
       vpToWin,
       turnTimer,
-      expansionBoard: isExpansion,
+      expansionBoard: expansionBoard,
     };
 
     sessionStorage.setItem("catan-game-config", JSON.stringify(config));
@@ -291,7 +292,7 @@ export default function Home() {
         <div className="w-60 shrink-0 bg-[#f0e6d0] pixel-border ml-3 flex flex-col h-[440px]">
           <div className="px-4 pt-3 pb-2">
             <h2 className="font-pixel text-[9px] text-gray-700">
-              PLAYERS ({players.length}/{isExpansion ? 6 : 4})
+              PLAYERS ({players.length}/{expansionBoard ? 6 : 4})
             </h2>
           </div>
 
@@ -464,7 +465,7 @@ export default function Home() {
 
           {/* Add bot + expansion badge */}
           <div className="px-4 pb-3 pt-2">
-            {players.length < 6 && (
+            {players.length < (expansionBoard ? 6 : 4) && (
               <button
                 onClick={addBot}
                 className="w-full py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342]"
@@ -472,7 +473,7 @@ export default function Home() {
                 + ADD BOT
               </button>
             )}
-            {isExpansion && (
+            {expansionBoard && (
               <div className="mt-2 bg-amber-100 pixel-border-sm px-3 py-1.5 text-center">
                 <span className="font-pixel text-[7px] text-amber-700">EXPANSION BOARD</span>
               </div>
@@ -541,12 +542,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Max Players */}
+                {/* Expansion Board */}
                 <div className="text-center">
-                  <span className="font-pixel text-[8px] text-gray-600 block mb-1">MAX PLAYERS</span>
-                  <span className="font-pixel text-[9px] text-gray-800">
-                    {players.length}/{isExpansion ? 6 : 4}
-                  </span>
+                  <span className="font-pixel text-[8px] text-gray-600 block mb-1">EXPANSION BOARD</span>
+                  <ToggleButton value={expansionBoard} onChange={(v) => { playClick(); setExpansionBoard(v); if (!v && players.length > 4) setPlayers(players.slice(0, 4)); }} />
                 </div>
               </div>
             </div>

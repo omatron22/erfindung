@@ -255,7 +255,7 @@ export default function OnlineGamePage() {
   // Lobby
   if (!gameState) {
     const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/join/${roomCode}` : "";
-    const isExpansion = lobbyPlayers.length >= 5;
+    const isExpansion = lobbyConfig?.expansionBoard ?? false;
     const usedColors = new Set(lobbyPlayers.map((p) => p.color));
     const myPlayer = lobbyPlayers.find((p) => p.index === myPlayerIndex);
     const timerIdx = lobbyConfig ? TURN_TIMER_OPTIONS.indexOf(lobbyConfig.turnTimer) : 0;
@@ -388,7 +388,7 @@ export default function OnlineGamePage() {
               })}
             </div>
             <div className="px-4 pb-3 pt-2">
-              {isHost && lobbyPlayers.length < 6 && (
+              {isHost && lobbyPlayers.length < (isExpansion ? 6 : 4) && (
                 <button onClick={handleAddBot} className="w-full py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342]">+ ADD BOT</button>
               )}
               {isExpansion && (
@@ -434,8 +434,13 @@ export default function OnlineGamePage() {
                     ) : <span className="font-pixel text-[10px] text-amber-600">{lobbyConfig?.vpToWin ?? 10}</span>}
                   </div>
                   <div className="text-center">
-                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">MAX PLAYERS</span>
-                    <span className="font-pixel text-[9px] text-gray-800">{lobbyPlayers.length}/{isExpansion ? 6 : 4}</span>
+                    <span className="font-pixel text-[8px] text-gray-600 block mb-1">EXPANSION BOARD</span>
+                    {isHost ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <button className={`px-3 py-1.5 font-pixel text-[8px] border-2 border-black border-r-0 ${!isExpansion ? "bg-gray-400 text-white" : "bg-[#e8d8b8] text-gray-500"}`} onClick={() => handleUpdateConfig({ expansionBoard: false })}>OFF</button>
+                        <button className={`px-3 py-1.5 font-pixel text-[8px] border-2 border-black ${isExpansion ? "bg-amber-400 text-gray-900" : "bg-[#e8d8b8] text-gray-500"}`} onClick={() => handleUpdateConfig({ expansionBoard: true })}>ON</button>
+                      </div>
+                    ) : <span className="font-pixel text-[9px] text-gray-800">{isExpansion ? "ON" : "OFF"}</span>}
                   </div>
                 </div>
               </div>

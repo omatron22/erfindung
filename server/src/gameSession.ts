@@ -39,7 +39,7 @@ export function handleStartGame(io: TypedServer, socket: TypedSocket) {
     gameMode: room.lobbyConfig.gameMode,
     vpToWin: room.lobbyConfig.vpToWin,
     turnTimer: room.lobbyConfig.turnTimer,
-    expansionBoard: room.players.length >= 5,
+    expansionBoard: room.lobbyConfig.expansionBoard,
   };
 
   room.gameConfig = config;

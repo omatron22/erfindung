@@ -28,10 +28,11 @@ export function filterStateForPlayer(
       };
     }
 
-    // Opponent: hide dev cards and specific resources
-    const { developmentCards, newDevelopmentCards, ...rest } = p;
+    // Opponent: hide dev cards, specific resources, and hidden VP
+    const { developmentCards, newDevelopmentCards, hiddenVictoryPoints, ...rest } = p;
     return {
       ...rest,
+      hiddenVictoryPoints: 0,
       resourceCount,
       developmentCardCount,
     };

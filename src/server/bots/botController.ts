@@ -161,7 +161,7 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
 
   // City (highest priority — direct VP)
   if (canAfford(player, BUILDING_COSTS.city) && player.settlements.length > 0) {
-    let score = 100 * w.cityScore;
+    let score = 110 * w.cityScore;
     if (context.strategy === "cities") score += 20;
     if (context.isEndgame) score += 30;
     options.push({
@@ -180,7 +180,7 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
     const vertex = pickBuildVertex(state, botIndex);
     if (vertex) {
       hasReachableVertex = true;
-      let score = 80 * w.settlementScore;
+      let score = 90 * w.settlementScore;
       if (context.strategy === "expansion") score += 15;
       if (context.isEndgame) score += 20;
       options.push({
@@ -194,8 +194,9 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
   // Dev card
   if (canAfford(player, BUILDING_COSTS.developmentCard) && state.developmentCardDeck.length > 0) {
     let score = 25 * w.devCardScore;
-    if (context.distanceToLargestArmy <= 2) score += 60;
-    if (context.distanceToLargestArmy <= 1) score += 80;
+    // Only chase largest army when bot has meaningful progress (2+ knights)
+    if (context.distanceToLargestArmy <= 2 && player.knightsPlayed >= 2) score += 30;
+    if (context.distanceToLargestArmy <= 1 && player.knightsPlayed >= 2) score += 50;
     if (context.strategy === "development") score += 30;
     if (context.isEndgame && context.distanceToLargestArmy <= 2) score += 25;
     options.push({
@@ -210,7 +211,9 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
     const edge = pickBuildRoad(state, botIndex, context);
     if (edge) {
       let score = 15 * w.roadScore;
-      if (context.distanceToLongestRoad <= 2) score += 50;
+      // Only chase longest road when bot has meaningful progress (3+ consecutive roads)
+      if (context.distanceToLongestRoad <= 2 && player.longestRoadLength >= 3) score += 25;
+      if (context.distanceToLongestRoad <= 1 && player.longestRoadLength >= 3) score += 40;
       if (context.strategy === "expansion") score += 10;
       if (context.isEndgame && context.distanceToLongestRoad <= 2) score += 15;
       // Boost road score when no reachable vertex — need roads to expand
@@ -256,13 +259,19 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
   // 3. Consider bot-initiated player trade
   const playerTrade = pickPlayerTrade(state, botIndex, context);
   if (playerTrade) {
-    return {
-      type: "offer-trade",
-      playerIndex: botIndex,
-      offering: playerTrade.offering,
-      requesting: playerTrade.requesting,
-      toPlayer: null, // open offer
-    };
+    const hash = getTradeHash(playerTrade.offering, playerTrade.requesting);
+    const mem = proposedTradeMemory.get(botIndex);
+    const tooRecent = mem && mem.hash === hash && state.turnNumber - mem.turn < 3;
+    if (!tooRecent) {
+      proposedTradeMemory.set(botIndex, { hash, turn: state.turnNumber });
+      return {
+        type: "offer-trade",
+        playerIndex: botIndex,
+        offering: playerTrade.offering,
+        requesting: playerTrade.requesting,
+        toPlayer: null, // open offer
+      };
+    }
   }
 
   // 4. Consider bank trading
@@ -398,8 +407,11 @@ export function generateBotCounterOffer(
   }
 }
 
-// Per-turn trade memory to reject repeated identical trades
+// Per-turn trade memory to reject repeated identical trades (for responses)
 const tradeMemory = new Map<string, { tradeHash: string; turn: number }>();
+
+// Per-bot trade proposal memory — prevents bots from proposing the same trade repeatedly
+const proposedTradeMemory = new Map<number, { hash: string; turn: number }>();
 
 function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: Partial<Record<Resource, number>>): string {
   const o = ALL_RESOURCES.map((r) => offering[r] ?? 0).join(",");

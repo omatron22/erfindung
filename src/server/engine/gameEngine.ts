@@ -82,11 +82,13 @@ export function createGame(id: string, playerNames: string[], config?: GameConfi
     portsAccess: [],
   }));
 
+  const startingPlayerIndex = Math.floor(Math.random() * players.length);
+
   const state: GameState = {
     id,
     board,
     players,
-    currentPlayerIndex: 0,
+    currentPlayerIndex: startingPlayerIndex,
     phase: "setup-forward",
     turnPhase: "trade-or-build",
     turnNumber: 0,
@@ -95,6 +97,7 @@ export function createGame(id: string, playerNames: string[], config?: GameConfi
     pendingTrade: null,
     discardingPlayers: [],
     setupPlacementsMade: 0,
+    startingPlayerIndex,
     winner: null,
     longestRoadHolder: null,
     largestArmyHolder: null,
@@ -315,12 +318,13 @@ function handlePlaceRoad(state: GameState, playerIndex: number, edge: EdgeKey): 
 function advanceSetup(state: GameState) {
   const numPlayers = state.players.length;
   const totalSetupActions = numPlayers * 4; // 2 settlements + 2 roads per player
+  const start = state.startingPlayerIndex;
 
   if (state.setupPlacementsMade >= totalSetupActions) {
     // Setup complete, start main game
     state.phase = "main";
     state.turnPhase = "roll";
-    state.currentPlayerIndex = 0;
+    state.currentPlayerIndex = start;
     state.turnNumber = 1;
     return;
   }
@@ -334,10 +338,10 @@ function advanceSetup(state: GameState) {
 
   if (currentRound === 0) {
     state.phase = "setup-forward";
-    state.currentPlayerIndex = positionInRound;
+    state.currentPlayerIndex = (start + positionInRound) % numPlayers;
   } else {
     state.phase = "setup-reverse";
-    state.currentPlayerIndex = numPlayers - 1 - positionInRound;
+    state.currentPlayerIndex = (start + numPlayers - 1 - positionInRound) % numPlayers;
   }
 }
 
