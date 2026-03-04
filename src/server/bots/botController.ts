@@ -135,6 +135,11 @@ function makeMainPhaseAction(state: GameState, botIndex: number, context: BotStr
   const player = state.players[botIndex];
   const w = context.weights;
 
+  // 0. Always take a free nuke — no cost, always worth it
+  if (state.freeNukeAvailable && state.config?.sheepNuke) {
+    return { type: "sheep-nuke", playerIndex: botIndex };
+  }
+
   // 1. Consider playing a dev card
   if (!player.hasPlayedDevCardThisTurn) {
     const devCard = pickDevCardToPlay(state, botIndex, context);

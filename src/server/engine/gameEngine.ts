@@ -1097,12 +1097,17 @@ function handleSheepNuke(state: GameState, playerIndex: number): ActionResult {
   if (!state.config?.sheepNuke) return { valid: false, error: "Sheep nuke is not enabled" };
 
   const player = state.players[playerIndex];
-  if (player.resources.wool < SHEEP_NUKE_COST) {
+  const isFreeNuke = !!state.freeNukeAvailable;
+  if (!isFreeNuke && player.resources.wool < SHEEP_NUKE_COST) {
     return { valid: false, error: `Need ${SHEEP_NUKE_COST} wool to sheep nuke` };
   }
 
   const newState = cloneState(state);
-  newState.players[playerIndex].resources.wool -= SHEEP_NUKE_COST;
+  if (isFreeNuke) {
+    newState.freeNukeAvailable = false;
+  } else {
+    newState.players[playerIndex].resources.wool -= SHEEP_NUKE_COST;
+  }
 
   // Roll dice
   const die1 = Math.floor(Math.random() * 6) + 1;
@@ -1118,7 +1123,9 @@ function handleSheepNuke(state: GameState, playerIndex: number): ActionResult {
   newState.log.push({
     timestamp: Date.now(),
     playerIndex,
-    message: `${player.name} spent ${SHEEP_NUKE_COST} wool and rolled ${die1} + ${die2} = ${total} for SHEEP NUKE!`,
+    message: isFreeNuke
+      ? `${player.name} used FREE NUKE (doubles!) and rolled ${die1} + ${die2} = ${total}!`
+      : `${player.name} spent ${SHEEP_NUKE_COST} wool and rolled ${die1} + ${die2} = ${total} for SHEEP NUKE!`,
     type: "action",
   });
 
@@ -1137,6 +1144,18 @@ function handleSheepNuke(state: GameState, playerIndex: number): ActionResult {
   // Destroy structures on hexes with this number
   const destroyEvents = destroyStructuresOnNumber(newState, total, playerIndex);
   events.push(...destroyEvents);
+
+  // Free nuke on doubles
+  if (newState.config?.doublesRollAgain && die1 === die2) {
+    newState.freeNukeAvailable = true;
+    events.push({ type: "sheep-nuke-doubles", playerIndex });
+    newState.log.push({
+      timestamp: Date.now(),
+      playerIndex,
+      message: `${player.name} rolled doubles — FREE NUKE available!`,
+      type: "action",
+    });
+  }
 
   newState.turnPhase = "trade-or-build";
   return { valid: true, newState, events };
@@ -1160,6 +1179,18 @@ function handleSheepNukePick(state: GameState, playerIndex: number, number: numb
   const events: GameEvent[] = [];
   const destroyEvents = destroyStructuresOnNumber(newState, number, playerIndex);
   events.push(...destroyEvents);
+
+  // Free nuke on doubles (the dice that triggered the pick were doubles if die1===die2)
+  if (newState.config?.doublesRollAgain && state.lastDiceRoll && state.lastDiceRoll.die1 === state.lastDiceRoll.die2) {
+    newState.freeNukeAvailable = true;
+    events.push({ type: "sheep-nuke-doubles", playerIndex });
+    newState.log.push({
+      timestamp: Date.now(),
+      playerIndex,
+      message: `${newState.players[playerIndex].name} rolled doubles — FREE NUKE available!`,
+      type: "action",
+    });
+  }
 
   newState.turnPhase = "trade-or-build";
   return { valid: true, newState, events };
@@ -1288,6 +1319,9 @@ function handleEndTurn(state: GameState, playerIndex: number): ActionResult {
 
   // Cancel any pending trade
   newState.pendingTrade = null;
+
+  // Reset free nuke
+  newState.freeNukeAvailable = false;
 
   // Doubles roll again: if enabled and last roll was doubles, same player rolls again
   const doublesRollAgain = newState.config?.doublesRollAgain &&

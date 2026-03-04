@@ -191,7 +191,8 @@ export type GameEventType =
   | "turn-ended"
   | "doubles-roll-again"
   | "sheep-nuke-rolled"
-  | "sheep-nuke-destroyed";
+  | "sheep-nuke-destroyed"
+  | "sheep-nuke-doubles";
 
 export interface GameEvent {
   type: GameEventType;

@@ -142,6 +142,7 @@ export interface GameState {
   log: GameLogEntry[];
   config?: GameConfig;
   fairDiceBag?: number[];
+  freeNukeAvailable?: boolean;
 }
 
 export interface GameLogEntry {

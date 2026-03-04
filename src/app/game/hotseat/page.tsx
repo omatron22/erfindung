@@ -14,9 +14,10 @@ import {
   playChat, playSetup, playWin, playCollect, playClick, playAchievement,
   playExplosion, stopMusic,
 } from "@/app/utils/sounds";
+import NukeSequenceOverlay from "@/app/components/ui/NukeSequenceOverlay";
 import type { Announcement } from "@/app/components/ui/AnnouncementOverlay";
 import type { GameAction, GameEvent } from "@/shared/types/actions";
-import type { GameState, GameLogEntry, Resource } from "@/shared/types/game";
+import type { GameState, GameLogEntry, Resource, DiceRoll } from "@/shared/types/game";
 import type { HexKey } from "@/shared/types/coordinates";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import { applyAction } from "@/server/engine/gameEngine";
@@ -41,6 +42,15 @@ interface BotTradeUI {
   initiatingBot: number;
   botResponses: Record<number, "pending" | "accepted" | "rejected">;
   resolved: boolean;
+}
+
+interface NukeSequenceState {
+  diceResult: DiceRoll;
+  resultState: GameState;
+  events: GameEvent[];
+  playerName: string;
+  playerColor: string;
+  isFreeNuke: boolean;
 }
 
 export default function GamePage() {
@@ -68,6 +78,7 @@ export default function GamePage() {
   const [botTradeUI, setBotTradeUI] = useState<BotTradeUI | null>(null);
   const [turnDeadline, setTurnDeadline] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [nukeSequence, setNukeSequence] = useState<NukeSequenceState | null>(null);
   const botTimerRef = useRef<NodeJS.Timeout | null>(null);
   const tradeTimersRef = useRef<NodeJS.Timeout[]>([]);
 
@@ -671,9 +682,38 @@ export default function GamePage() {
     cancelPendingTrade(pendingTradeUI.tradeState, pendingTradeUI.tradeId);
   }
 
+  // === NUKE SEQUENCE HANDLER ===
+  const handleNukeSequenceComplete = useCallback(() => {
+    if (!nukeSequence) return;
+    const { resultState, events } = nukeSequence;
+    setGameState(resultState);
+    triggerNukeEffects(events, resultState);
+    checkAchievementEvents(events, resultState);
+    setNukeSequence(null);
+  }, [nukeSequence, setGameState]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // === ACTION HANDLER ===
   const handleAction = useCallback((action: GameAction) => {
     clearError();
+
+    // Intercept human sheep-nuke: run cinematic sequence before applying state
+    if (action.type === "sheep-nuke" && !botIndices.includes(action.playerIndex) && gameState) {
+      const result = applyAction(gameState, action);
+      if (result.valid && result.newState && result.newState.lastDiceRoll) {
+        const player = gameState.players[action.playerIndex];
+        setNukeSequence({
+          diceResult: result.newState.lastDiceRoll,
+          resultState: result.newState,
+          events: result.events ?? [],
+          playerName: player.name,
+          playerColor: PLAYER_COLOR_HEX[player.color],
+          isFreeNuke: !!gameState.freeNukeAvailable,
+        });
+        return;
+      }
+      // If invalid, fall through to dispatch for error handling
+    }
+
     const result = dispatch(action);
 
     if (result.valid && result.newState) {
@@ -944,6 +984,15 @@ export default function GamePage() {
         onDismissAnnouncement={() => setAnnouncement(null)}
         onDiceAnimationStart={playDiceRoll}
       />
+      {nukeSequence && (
+        <NukeSequenceOverlay
+          diceResult={nukeSequence.diceResult}
+          playerName={nukeSequence.playerName}
+          playerColor={nukeSequence.playerColor}
+          onSequenceComplete={handleNukeSequenceComplete}
+          isFreeNuke={nukeSequence.isFreeNuke}
+        />
+      )}
       {gameState.phase === "finished" && (
         <VictoryOverlay
           gameState={gameState}
