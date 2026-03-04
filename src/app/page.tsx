@@ -190,12 +190,12 @@ export default function Home() {
 
     const onJoined = ({ roomCode, playerIndex, reconnectToken }: { roomCode: string; playerIndex: number; reconnectToken: string }) => {
       useMultiplayerStore.getState().setRoomJoined(roomCode, playerIndex, reconnectToken);
-      setCreating(false);
+      // Don't setCreating(false) here — the navigation effect below needs creating=true
     };
 
     const onError = ({ message }: { message: string }) => {
       useMultiplayerStore.getState().setError(message);
-      setCreating(false);
+      setCreating(false); // Only reset on error so the user can retry
     };
 
     socket.on("room:joined", onJoined);
