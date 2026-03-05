@@ -106,6 +106,23 @@ body {
   animation: pulse-soft 1.5s ease-in-out infinite;
 }
 
+/* Pending placement confirmation glow */
+@keyframes confirm-glow {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.15); }
+}
+
+@keyframes confirm-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+@keyframes checkmark-pop {
+  0% { opacity: 0; transform: scale(0.3); }
+  50% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
 /* Dice rolling shake animation */
 @keyframes dice-shake {
   0% { transform: translate(-1px, -1px) rotate(-1deg); }

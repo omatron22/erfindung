@@ -383,24 +383,35 @@ export default function HexBoard({
               const [v1, v2] = edgeEndpoints(pendingPlacement.key);
               const p1 = vertexToPixel(v1, size);
               const p2 = vertexToPixel(v2, size);
+              const mx = (p1.x + p2.x) / 2;
+              const my = (p1.y + p2.y) / 2;
+              const cr = size * 0.22;
               return (
                 <g
                   className="cursor-pointer"
                   onClick={onEdgeClick ? () => { if (!dragMoved.current) onEdgeClick(pendingPlacement.key); } : undefined}
                 >
-                  {/* Glow */}
+                  {/* Outer glow */}
                   <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke={color} strokeWidth={size * 0.22} strokeLinecap="round" opacity={0.3}
-                    className="animate-pulse" />
-                  {/* Outline */}
+                    stroke={color} strokeWidth={size * 0.3} strokeLinecap="round"
+                    opacity={0.25} style={{ animation: "confirm-glow 1.2s ease-in-out infinite" }} />
+                  {/* Road outline */}
                   <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke="#2c1810" strokeWidth={size * 0.14} strokeLinecap="round" />
-                  {/* Fill */}
+                    stroke="#2c1810" strokeWidth={size * 0.16} strokeLinecap="round" />
+                  {/* Road fill */}
                   <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke={color} strokeWidth={size * 0.1} strokeLinecap="round" opacity={0.75} />
+                    stroke={color} strokeWidth={size * 0.11} strokeLinecap="round" />
+                  {/* Checkmark badge */}
+                  <circle cx={mx} cy={my} r={cr} fill="#1a7a1a" stroke="#fff" strokeWidth={1.5}
+                    style={{ animation: "checkmark-pop 0.3s ease-out forwards" }} />
+                  <text x={mx} y={my + 1} textAnchor="middle" dominantBaseline="central"
+                    fill="#fff" fontSize={cr * 1.2} fontWeight="bold"
+                    style={{ animation: "checkmark-pop 0.3s ease-out forwards", pointerEvents: "none" }}>
+                    ✓
+                  </text>
                   {/* Hit target */}
                   <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke="transparent" strokeWidth={size * 0.35} strokeLinecap="round" />
+                    stroke="transparent" strokeWidth={size * 0.4} strokeLinecap="round" />
                 </g>
               );
             } else {
@@ -408,18 +419,34 @@ export default function HexBoard({
               const pos = vertexToPixel(pendingPlacement.key, size);
               const r = size * 0.15;
               const path = def[pendingPlacement.type](pos, r);
+              const cr = r * 0.9;
+              // Checkmark badge position — offset above the building
+              const badgeY = pos.y - r * 2.2;
               return (
                 <g
                   className="cursor-pointer"
                   onClick={onVertexClick ? () => { if (!dragMoved.current) onVertexClick(pendingPlacement.key); } : undefined}
                 >
-                  {/* Glow circle */}
-                  <circle cx={pos.x} cy={pos.y} r={r * 2.5}
-                    fill={color} opacity={0.2} className="animate-pulse" />
-                  {/* Building shape */}
-                  <path d={path} fill={color} stroke="#000" strokeWidth={2} opacity={0.75} />
+                  {/* Pulsing glow ring */}
+                  <circle cx={pos.x} cy={pos.y} r={r * 2.8}
+                    fill="none" stroke={color} strokeWidth={2}
+                    opacity={0.5} style={{ animation: "confirm-glow 1.2s ease-in-out infinite", transformOrigin: `${pos.x}px ${pos.y}px` }} />
+                  {/* Solid glow fill */}
+                  <circle cx={pos.x} cy={pos.y} r={r * 2.2}
+                    fill={color} opacity={0.15} />
+                  {/* Building shape — full color with gentle bounce */}
+                  <path d={path} fill={color} stroke="#000" strokeWidth={2}
+                    style={{ animation: "confirm-bounce 1.2s ease-in-out infinite", transformOrigin: `${pos.x}px ${pos.y}px` }} />
+                  {/* Checkmark badge */}
+                  <circle cx={pos.x} cy={badgeY} r={cr} fill="#1a7a1a" stroke="#fff" strokeWidth={1.5}
+                    style={{ animation: "checkmark-pop 0.3s ease-out forwards" }} />
+                  <text x={pos.x} y={badgeY + 1} textAnchor="middle" dominantBaseline="central"
+                    fill="#fff" fontSize={cr * 1.3} fontWeight="bold"
+                    style={{ animation: "checkmark-pop 0.3s ease-out forwards", pointerEvents: "none" }}>
+                    ✓
+                  </text>
                   {/* Hit target */}
-                  <circle cx={pos.x} cy={pos.y} r={r * 2.5} fill="transparent" />
+                  <circle cx={pos.x} cy={pos.y} r={r * 3} fill="transparent" />
                 </g>
               );
             }
