@@ -801,6 +801,12 @@ export default function GamePage() {
     return gameState.players.some((p, i) => i !== HUMAN_PLAYER_INDEX && p.resources[resource] > 0);
   }, [gameState]);
 
+  // --- Hotseat: check if any opponent has a given resource (for OFFER button visibility) ---
+  const canOpponentProvide = useCallback((resource: Resource): boolean => {
+    if (!gameState) return false;
+    return gameState.players.some((p, i) => i !== HUMAN_PLAYER_INDEX && p.resources[resource] > 0);
+  }, [gameState]);
+
   // === RENDER ===
   if (!gameState) {
     return (
@@ -1010,6 +1016,7 @@ export default function GamePage() {
         error={error}
         botThinking={botThinking}
         onAddToRequesting={handleAddToRequesting}
+        canOpponentProvide={canOpponentProvide}
         tradeOverlay={botTradeOverlayNode || tradeOverlayNode}
         showTradeOverlay={pendingTradeUI !== null || botTradeUI !== null}
         announcement={announcement}

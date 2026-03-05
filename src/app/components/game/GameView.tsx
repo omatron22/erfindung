@@ -70,6 +70,9 @@ export interface GameViewProps {
   // Hotseat: validate requesting against opponent resources (return false to block)
   onAddToRequesting?: (resource: Resource) => boolean;
 
+  // Hotseat: check if any opponent has a given resource (used to hide OFFER button)
+  canOpponentProvide?: (resource: Resource) => boolean;
+
   // Achievement announcements
   announcement?: Announcement | null;
   onDismissAnnouncement?: () => void;
@@ -108,6 +111,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     tradeOverlay,
     showTradeOverlay,
     onAddToRequesting,
+    canOpponentProvide,
     announcement,
     onDismissAnnouncement,
     onDiceAnimationStart,
@@ -482,15 +486,39 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
           <div className="absolute bottom-2 right-2 left-2 flex items-end justify-between gap-2 pointer-events-none" style={{ zIndex: 20 }}>
             {/* Left side: trade panels */}
             <div className="flex flex-col gap-2">
-              {showTradeStrip && (
-                <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-2 py-1.5 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
-                  <div className="flex flex-col gap-1">
-                    {/* GIVE row (top) */}
+              {showTradeStrip && (() => {
+                const bankValid = bankInfo &&
+                  trade.requesting.length > 0 &&
+                  trade.requesting.length === bankInfo.receivingCount &&
+                  !trade.requesting.some((r) => r === bankInfo.giving);
+                const offerReady = trade.offering.length > 0 && trade.requesting.length > 0;
+                const showOffer = offerReady && (
+                  !canOpponentProvide || trade.requesting.some((r) => canOpponentProvide(r))
+                );
+                return (
+                <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-2 py-2 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
+                  <div className="flex flex-col gap-1.5">
+                    {/* Resource selector buttons (top row) */}
+                    <div className="flex gap-1 justify-center">
+                      {ALL_RESOURCES.map((res) => (
+                        <button
+                          key={res}
+                          onClick={() => handleAddToRequesting(res)}
+                          className={`w-7 h-7 flex items-center justify-center border-2 border-[#8b7355] hover:border-amber-500 hover:scale-110 transition-all${trade.shakenResource === res ? " res-shake" : ""}`}
+                          style={{ backgroundColor: RESOURCE_COLORS[res] }}
+                          title={`Request ${RESOURCE_LABELS[res]}`}
+                        >
+                          <ResourceIcon resource={res} size={14} />
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Offering row */}
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[7px] text-green-700 font-bold w-7 shrink-0">GIVE:</span>
+                      <span className="text-[7px] text-green-700 font-bold w-[52px] shrink-0">OFFERING:</span>
                       <div className="flex items-center gap-0.5 flex-wrap min-w-[40px]">
                         {trade.offering.length === 0 ? (
-                          <span className="text-[6px] text-gray-500">click cards</span>
+                          <span className="text-[6px] text-gray-500">click your cards</span>
                         ) : (
                           trade.offering.map((res, i) => (
                             <MiniCard key={`o-${i}`} resource={res} onClick={() => trade.removeFromOffering(i)} glow="green" />
@@ -499,25 +527,12 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                       </div>
                     </div>
 
-                    {/* GET row (bottom) */}
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="text-[7px] text-red-700 font-bold w-7 shrink-0">GET:</span>
-                      <div className="flex gap-0.5">
-                        {ALL_RESOURCES.map((res) => (
-                          <button
-                            key={res}
-                            onClick={() => handleAddToRequesting(res)}
-                            className={`w-6 h-6 flex items-center justify-center border border-[#8b7355] hover:border-amber-600 transition-colors${trade.shakenResource === res ? " res-shake" : ""}`}
-                            style={{ backgroundColor: RESOURCE_COLORS[res] }}
-                            title={`Request ${RESOURCE_LABELS[res]}`}
-                          >
-                            <ResourceIcon resource={res} size={12} />
-                          </button>
-                        ))}
-                      </div>
+                    {/* Requesting row */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[7px] text-red-700 font-bold w-[52px] shrink-0">REQUESTING:</span>
                       <div className="flex items-center gap-0.5 flex-wrap min-w-[40px]">
                         {trade.requesting.length === 0 ? (
-                          <span className="text-[6px] text-gray-500">click +</span>
+                          <span className="text-[6px] text-gray-500">click resources above</span>
                         ) : (
                           trade.requesting.map((res, i) => (
                             <MiniCard key={`r-${i}`} resource={res} onClick={() => trade.removeFromRequesting(i)} glow="red" />
@@ -528,41 +543,31 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
 
                     {/* Action buttons row */}
                     <div className="flex gap-1 justify-end">
-                      {/* Bank trade button */}
-                      {(() => {
-                        const bankValid = bankInfo &&
-                          trade.requesting.length > 0 &&
-                          trade.requesting.length === bankInfo.receivingCount &&
-                          !trade.requesting.some((r) => r === bankInfo.giving);
-                        return bankInfo ? (
-                          <button
-                            onClick={bankValid ? handleBankTradeSimple : undefined}
-                            disabled={!bankValid}
-                            className={`px-2 py-1 text-[7px] pixel-btn ${
-                              bankValid
-                                ? "bg-amber-600 text-white"
-                                : "bg-[#d4c4a8] text-gray-500 cursor-not-allowed"
-                            }`}
-                            title={bankValid
-                              ? `Bank trade ${bankInfo.ratio}:1 — click to execute`
-                              : `Select ${bankInfo.receivingCount} resource(s) to receive (${bankInfo.ratio}:1)`}
-                          >
-                            BANK
-                          </button>
-                        ) : null;
-                      })()}
+                      {bankInfo && (
+                        <button
+                          onClick={bankValid ? handleBankTradeSimple : undefined}
+                          disabled={!bankValid}
+                          className={`px-2 py-1 text-[7px] pixel-btn ${
+                            bankValid
+                              ? "bg-amber-600 text-white"
+                              : "bg-[#d4c4a8] text-gray-500 cursor-not-allowed"
+                          }`}
+                          title={bankValid
+                            ? `Bank trade ${bankInfo.ratio}:1 — click to execute`
+                            : `Select ${bankInfo.receivingCount} resource(s) to receive (${bankInfo.ratio}:1)`}
+                        >
+                          BANK
+                        </button>
+                      )}
 
-                      <button
-                        onClick={handlePlayerTrade}
-                        disabled={trade.offering.length === 0 || trade.requesting.length === 0}
-                        className={`px-2 py-1 text-[7px] pixel-btn ${
-                          trade.offering.length > 0 && trade.requesting.length > 0
-                            ? "bg-green-600 text-white"
-                            : "bg-[#d4c4a8] text-gray-500 cursor-not-allowed"
-                        }`}
-                      >
-                        OFFER
-                      </button>
+                      {showOffer && (
+                        <button
+                          onClick={handlePlayerTrade}
+                          className="px-2 py-1 text-[7px] pixel-btn bg-green-600 text-white"
+                        >
+                          OFFER
+                        </button>
+                      )}
 
                       <button
                         onClick={() => trade.closeTrade()}
@@ -573,7 +578,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                     </div>
                   </div>
                 </div>
-              )}
+                ); })()}
 
               {/* Trade response overlay slot (hotseat only) */}
               {showTradeOverlay && tradeOverlay}
