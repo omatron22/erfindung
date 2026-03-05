@@ -85,30 +85,52 @@ export default function GamePage() {
   // Stop lobby music when game starts
   useEffect(() => { stopMusic(); }, []);
 
-  // Initialize game — restore saved state on refresh, or create new game
+  // Initialize game on mount — fresh config takes priority over saved state
+  const didInit = useRef(false);
   useEffect(() => {
-    if (!gameState) {
-      // Try to restore in-progress game from sessionStorage
-      const savedState = sessionStorage.getItem("catan-game-state");
+    if (didInit.current) return;
+    didInit.current = true;
+
+    // If there's a fresh config from the lobby, always use it (new game)
+    const fullStored = sessionStorage.getItem("catan-game-config");
+    const savedState = sessionStorage.getItem("catan-game-state");
+
+    if (fullStored) {
+      // Check if the saved state matches this config (refresh during game)
+      // vs a stale state from a previous game
       if (savedState) {
         try {
           const parsed = JSON.parse(savedState);
-          const fc = parsed.config;
-          if (fc?.players) {
-            initGame(fc);
-            // Overwrite the freshly created game with the saved state
-            setGameState(parsed);
-          } else {
-            setGameState(parsed);
+          const storedConfig = JSON.stringify(parsed.config);
+          if (storedConfig === fullStored) {
+            // Same config — restore the in-progress game
+            const fc = parsed.config;
+            if (fc?.players) {
+              initGame(fc);
+              setGameState(parsed);
+            } else {
+              setGameState(parsed);
+            }
+            return;
           }
-          return;
         } catch {}
       }
-      const fullStored = sessionStorage.getItem("catan-game-config");
-      if (fullStored) {
-        initGame(JSON.parse(fullStored));
-      } else {
-        // Fallback: create a default game config
+      // New game or config mismatch — start fresh
+      sessionStorage.removeItem("catan-game-state");
+      initGame(JSON.parse(fullStored));
+    } else if (savedState) {
+      // No config but saved state (legacy/edge case) — restore it
+      try {
+        const parsed = JSON.parse(savedState);
+        const fc = parsed.config;
+        if (fc?.players) {
+          initGame(fc);
+          setGameState(parsed);
+        } else {
+          setGameState(parsed);
+        }
+      } catch {
+        // Corrupted — start default
         initGame({
           players: [
             { name: "You", color: "red", isBot: false },
@@ -120,8 +142,20 @@ export default function GamePage() {
           sheepNuke: false, gameMode: "classic", vpToWin: 10, turnTimer: 0, expansionBoard: false,
         });
       }
+    } else {
+      // Nothing saved — default game
+      initGame({
+        players: [
+          { name: "You", color: "red", isBot: false },
+          { name: "Alice", color: "blue", isBot: true },
+          { name: "Bob", color: "orange", isBot: true },
+          { name: "Carol", color: "green", isBot: true },
+        ],
+        fairDice: false, friendlyRobber: false, doublesRollAgain: false,
+        sheepNuke: false, gameMode: "classic", vpToWin: 10, turnTimer: 0, expansionBoard: false,
+      });
     }
-  }, [gameState, initGame, setGameState]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Save game state to sessionStorage on every change (for refresh persistence)
   useEffect(() => {
