@@ -93,11 +93,9 @@ export default function GamePage() {
       if (savedState) {
         try {
           const parsed = JSON.parse(savedState);
-          // Re-init via initGame path to also set botIndices and fullConfig
           const fc = parsed.config;
-          if (fc) {
-            const lc = { playerName: fc.players[0]?.name ?? "You", botNames: fc.players.slice(1).map((p: { name: string }) => p.name) };
-            initGame(lc, fc);
+          if (fc?.players) {
+            initGame(fc);
             // Overwrite the freshly created game with the saved state
             setGameState(parsed);
           } else {
@@ -107,15 +105,20 @@ export default function GamePage() {
         } catch {}
       }
       const fullStored = sessionStorage.getItem("catan-game-config");
-      const legacyStored = sessionStorage.getItem("catan-config");
       if (fullStored) {
-        const fc = JSON.parse(fullStored);
-        const lc = { playerName: fc.players[0]?.name ?? "You", botNames: fc.players.slice(1).map((p: { name: string }) => p.name) };
-        initGame(lc, fc);
-      } else if (legacyStored) {
-        initGame(JSON.parse(legacyStored));
+        initGame(JSON.parse(fullStored));
       } else {
-        initGame({ playerName: "You", botNames: ["Alice", "Bob", "Carol"] });
+        // Fallback: create a default game config
+        initGame({
+          players: [
+            { name: "You", color: "red", isBot: false },
+            { name: "Alice", color: "blue", isBot: true },
+            { name: "Bob", color: "orange", isBot: true },
+            { name: "Carol", color: "green", isBot: true },
+          ],
+          fairDice: false, friendlyRobber: false, doublesRollAgain: false,
+          sheepNuke: false, gameMode: "classic", vpToWin: 10, turnTimer: 0, expansionBoard: false,
+        });
       }
     }
   }, [gameState, initGame, setGameState]);
@@ -952,8 +955,8 @@ export default function GamePage() {
         buildingStyles={boardBuildingStyles}
         chatLog={gameState.log}
         onSendChat={handleSendChat}
-        onMainMenu={() => { resetGame(); sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-config"); sessionStorage.removeItem("catan-game-state"); router.push("/"); }}
-        onLobby={() => { resetGame(); sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-config"); sessionStorage.removeItem("catan-game-state"); sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
+        onMainMenu={() => { resetGame(); sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-game-state"); router.push("/"); }}
+        onLobby={() => { resetGame(); sessionStorage.removeItem("catan-game-config"); sessionStorage.removeItem("catan-game-state"); sessionStorage.setItem("catan-auto-lobby", "true"); router.push("/"); }}
         onRestart={() => {
           resetGame();
           setBotTradeUI(null);
@@ -961,13 +964,8 @@ export default function GamePage() {
           if (botTimerRef.current) { clearTimeout(botTimerRef.current); botTimerRef.current = null; }
           sessionStorage.removeItem("catan-game-state");
           const fullStored = sessionStorage.getItem("catan-game-config");
-          const legacyStored = sessionStorage.getItem("catan-config");
           if (fullStored) {
-            const fc = JSON.parse(fullStored);
-            const lc = { playerName: fc.players[0]?.name ?? "You", botNames: fc.players.slice(1).map((p: { name: string }) => p.name) };
-            initGame(lc, fc);
-          } else if (legacyStored) {
-            initGame(JSON.parse(legacyStored));
+            initGame(JSON.parse(fullStored));
           }
         }}
         flashingHexes={flashingHexes}
@@ -1002,13 +1000,8 @@ export default function GamePage() {
             setPendingTradeUI(null);
             if (botTimerRef.current) { clearTimeout(botTimerRef.current); botTimerRef.current = null; }
             const fullStored = sessionStorage.getItem("catan-game-config");
-            const legacyStored = sessionStorage.getItem("catan-config");
             if (fullStored) {
-              const fc = JSON.parse(fullStored);
-              const lc = { playerName: fc.players[0]?.name ?? "You", botNames: fc.players.slice(1).map((p: { name: string }) => p.name) };
-              initGame(lc, fc);
-            } else if (legacyStored) {
-              initGame(JSON.parse(legacyStored));
+              initGame(JSON.parse(fullStored));
             }
           }}
           onMainMenu={() => router.push("/")}

@@ -5,15 +5,9 @@ import type { VertexKey, EdgeKey, HexKey } from "@/shared/types/coordinates";
 import type { GameConfig } from "@/shared/types/config";
 import { createGame, applyAction } from "@/server/engine/gameEngine";
 
-interface LegacyGameConfig {
-  playerName: string;
-  botNames: string[];
-}
-
 interface GameStore {
   // State
   gameState: GameState | null;
-  config: LegacyGameConfig | null;
   fullConfig: GameConfig | null;
   botIndices: number[];
   activeAction: string | null;
@@ -25,7 +19,7 @@ interface GameStore {
   botThinking: boolean;
 
   // Actions
-  initGame: (config: LegacyGameConfig, fullConfig?: GameConfig) => void;
+  initGame: (config: GameConfig) => void;
   dispatch: (action: GameAction) => ActionResult;
   setGameState: (state: GameState) => void;
   setActiveAction: (action: string | null) => void;
@@ -39,7 +33,6 @@ interface GameStore {
 
 export const useGameStore = create<GameStore>((set, get) => ({
   gameState: null,
-  config: null,
   fullConfig: null,
   botIndices: [],
   activeAction: null,
@@ -50,17 +43,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
   error: null,
   botThinking: false,
 
-  initGame: (config: LegacyGameConfig, fullConfig?: GameConfig) => {
-    const allNames = [config.playerName, ...config.botNames];
-    const state = createGame(`game-${Date.now()}`, allNames, fullConfig);
-    // Determine bot indices from fullConfig if available
-    const botIndices = fullConfig
-      ? fullConfig.players.map((p, i) => (p.isBot ? i : -1)).filter((i) => i >= 0)
-      : config.botNames.map((_, i) => i + 1);
+  initGame: (config: GameConfig) => {
+    const allNames = config.players.map((p) => p.name);
+    const state = createGame(`game-${Date.now()}`, allNames, config);
+    const botIndices = config.players
+      .map((p, i) => (p.isBot ? i : -1))
+      .filter((i) => i >= 0);
     set({
       gameState: state,
-      config,
-      fullConfig: fullConfig ?? null,
+      fullConfig: config,
       botIndices,
       activeAction: null,
       highlightedVertices: new Set(),
@@ -102,7 +93,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
   clearError: () => set({ error: null }),
   resetGame: () => set({
     gameState: null,
-    config: null,
     fullConfig: null,
     botIndices: [],
     activeAction: null,

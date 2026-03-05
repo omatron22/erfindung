@@ -237,11 +237,6 @@ export default function Home() {
     };
 
     sessionStorage.setItem("catan-game-config", JSON.stringify(config));
-    // Also store legacy format for backwards compat
-    sessionStorage.setItem(
-      "catan-config",
-      JSON.stringify({ playerName: names[0], botNames: names.slice(1) })
-    );
     router.push("/game/hotseat");
   }
 
