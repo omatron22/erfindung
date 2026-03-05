@@ -227,7 +227,7 @@ function handleJoin(
     return;
   }
 
-  if (room.players.length >= 6) {
+  if (room.players.length >= 8) {
     socket.emit("game:error", { message: "Room is full" });
     return;
   }
@@ -255,9 +255,9 @@ function handleAddBot(io: TypedServer, socket: TypedSocket, difficulty: string, 
   const room = getRoomForSocket(socket.id);
   if (!room || room.hostSocketId !== socket.id) return;
   if (room.gameState) return; // can't add bots mid-game
-  if (room.players.length >= 6) return;
+  if (room.players.length >= 8) return;
 
-  const botNames = ["Alice", "Bob", "Carol", "Dave", "Eve"];
+  const botNames = ["Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace"];
   const usedNames = new Set(room.players.map((p) => p.name));
   const name = botNames.find((n) => !usedNames.has(n)) ?? `Bot ${room.players.length}`;
 

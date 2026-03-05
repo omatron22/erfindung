@@ -327,7 +327,7 @@ export default function OnlineGamePage() {
           {/* LEFT — Players */}
           <div className="w-full md:w-60 shrink-0 bg-[#f0e6d0] pixel-border md:ml-3 flex flex-col md:h-[440px]">
             <div className="px-4 pt-3 pb-2">
-              <h2 className="font-pixel text-[9px] text-gray-700">PLAYERS ({lobbyPlayers.length}/{isExpansion ? 6 : 4})</h2>
+              <h2 className="font-pixel text-[9px] text-gray-700">PLAYERS ({lobbyPlayers.length}/8)</h2>
             </div>
             <div className="px-4 space-y-2 md:overflow-y-auto flex-1">
               {lobbyPlayers.map((player) => {
@@ -429,7 +429,7 @@ export default function OnlineGamePage() {
               })}
             </div>
             <div className="px-4 pb-3 pt-2">
-              {isHost && lobbyPlayers.length < (isExpansion ? 6 : 4) && (
+              {isHost && lobbyPlayers.length < 8 && (
                 <button onClick={handleAddBot} className="w-full py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342]">+ ADD BOT</button>
               )}
               {isExpansion && (

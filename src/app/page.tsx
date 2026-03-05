@@ -16,12 +16,16 @@ import CloudLayer from "@/app/components/ui/CloudLayer";
 import { loadPreferences } from "@/app/utils/preferences";
 
 const ALL_COLORS = PLAYER_COLORS;
+const MAX_PLAYERS = 8;
+
 const BOT_DEFAULTS: { name: string; color: string; style: BuildingStyle }[] = [
   { name: "Chungus", color: "blue",   style: "medieval" },
   { name: "Lebron",  color: "orange", style: "modern" },
   { name: "Luffy",   color: "green",  style: "eastern" },
   { name: "Keyan",   color: "purple", style: "nordic" },
   { name: "Logan",   color: "teal",   style: "colonial" },
+  { name: "Sakura",  color: "pink",   style: "eastern" },
+  { name: "Hank",    color: "yellow", style: "medieval" },
 ];
 const BOT_NAMES = BOT_DEFAULTS.map((b) => b.name);
 
@@ -138,8 +142,7 @@ export default function Home() {
   const usedColors = new Set(players.map((p) => p.color));
 
   function addBot() {
-    const maxPlayers = expansionBoard ? 6 : 4;
-    if (players.length >= maxPlayers) return;
+    if (players.length >= MAX_PLAYERS) return;
     playClick();
     const usedNames = new Set(players.map((p) => p.name));
     const botDef = BOT_DEFAULTS.find((b) => !usedNames.has(b.name));
@@ -396,7 +399,7 @@ export default function Home() {
         <div className="w-full md:w-60 shrink-0 bg-[#f0e6d0] pixel-border md:ml-3 flex flex-col md:h-[440px]">
           <div className="px-4 pt-3 pb-2">
             <h2 className="font-pixel text-[9px] text-gray-700">
-              PLAYERS ({players.length}/{expansionBoard ? 6 : 4})
+              PLAYERS ({players.length}/{MAX_PLAYERS})
             </h2>
           </div>
 
@@ -569,7 +572,7 @@ export default function Home() {
 
           {/* Add bot + expansion badge */}
           <div className="px-4 pb-3 pt-2">
-            {players.length < (expansionBoard ? 6 : 4) && (
+            {players.length < MAX_PLAYERS && (
               <button
                 onClick={addBot}
                 className="w-full py-2 font-pixel text-[8px] pixel-btn bg-[#8BC34A] text-white hover:bg-[#7CB342]"
@@ -651,7 +654,7 @@ export default function Home() {
                 {/* Expansion Board */}
                 <div className="text-center col-span-2 flex flex-col items-center">
                   <span className="font-pixel text-[8px] text-gray-600 block mb-1">EXPANSION BOARD</span>
-                  <ToggleButton value={expansionBoard} onChange={(v) => { playClick(); setExpansionBoard(v); if (!v && players.length > 4) setPlayers(players.slice(0, 4)); }} />
+                  <ToggleButton value={expansionBoard} onChange={(v) => { playClick(); setExpansionBoard(v); }} />
                 </div>
               </div>
             </div>
