@@ -15,7 +15,7 @@ export interface PlayerTradeOffer {
 
 /**
  * Decide whether the bot should initiate a player trade.
- * Trades more freely — only hoards when within 1 resource of completing build goal.
+ * Bots will offer more cards when they have surplus to make trades more attractive.
  */
 export function pickPlayerTrade(
   state: GameState,
@@ -51,7 +51,7 @@ export function pickPlayerTrade(
     : Infinity;
 
   // Find surplus: resources we have 2+ of that we don't urgently need
-  const surplus: Resource[] = [];
+  const surplusList: { res: Resource; count: number }[] = [];
   for (const res of ALL_RESOURCES) {
     if (needed.includes(res)) continue;
     if (player.resources[res] < 2) continue;
@@ -60,13 +60,14 @@ export function pickPlayerTrade(
       const goalNeed = getGoalNeed(context, res);
       if (goalNeed > 0 && player.resources[res] <= goalNeed + 1) continue;
     }
-    surplus.push(res);
+    surplusList.push({ res, count: player.resources[res] });
   }
-  if (surplus.length === 0) return null;
+  if (surplusList.length === 0) return null;
 
-  const offerRes = surplus.reduce((best, res) =>
-    player.resources[res] > player.resources[best] ? res : best
-  );
+  // Pick the most surplus resource
+  surplusList.sort((a, b) => b.count - a.count);
+  const offerRes = surplusList[0].res;
+  const offerCount = surplusList[0].count;
 
   // Pick a needed resource that at least one opponent actually has
   const requestRes = needed.find((r) =>
@@ -74,15 +75,21 @@ export function pickPlayerTrade(
   );
   if (!requestRes) return null;
 
+  // Offer more when we have big surplus to make trades more attractive
+  // 4+ surplus: offer 2, 6+ surplus: offer 3
+  let offerAmount = 1;
+  if (offerCount >= 6) offerAmount = 3;
+  else if (offerCount >= 4) offerAmount = 2;
+
   return {
-    offering: { [offerRes]: 1 },
+    offering: { [offerRes]: offerAmount },
     requesting: { [requestRes]: 1 },
   };
 }
 
 /**
  * Decide whether the bot should make a bank trade.
- * Only protects goal resources when within 1 resource of completion.
+ * Ranks all possible bank trades and picks the best one by need urgency.
  */
 export function pickBankTrade(state: GameState, playerIndex: number, context?: BotStrategicContext): BankTrade | null {
   const player = state.players[playerIndex];
@@ -95,7 +102,14 @@ export function pickBankTrade(state: GameState, playerIndex: number, context?: B
     ? Object.values(context.buildGoal.missingResources).reduce((sum, n) => sum + (n || 0), 0)
     : Infinity;
 
-  for (const needed of needs) {
+  // Collect all valid trades and score them
+  const candidates: { trade: BankTrade; score: number }[] = [];
+
+  for (let ni = 0; ni < needs.length; ni++) {
+    const needed = needs[ni];
+    // Score: earlier in needs list = higher priority
+    const needScore = needs.length - ni;
+
     for (const giving of ALL_RESOURCES) {
       if (giving === needed) continue;
 
@@ -112,18 +126,30 @@ export function pickBankTrade(state: GameState, playerIndex: number, context?: B
         if (goalNeed > 0 && player.resources[giving] <= ratio + goalNeed) continue;
       }
 
-      // Standard 1x trade
-      if (player.resources[giving] >= ratio) {
-        // Try multi-ratio if large surplus (get 2 of the needed resource)
-        if (player.resources[giving] >= ratio * 2 && !giveNeed) {
-          return { giving, givingCount: ratio * 2, receiving: needed };
-        }
-        return { giving, givingCount: ratio, receiving: needed };
+      // Score: prefer better ratios and higher need priority
+      // Lower ratio = more efficient = better
+      const ratioBonus = (5 - ratio); // 4:1=1, 3:1=2, 2:1=3
+      const surplusBonus = Math.min(player.resources[giving] - ratio, 3); // extra cards after trade
+      const score = needScore * 3 + ratioBonus * 2 + surplusBonus;
+
+      const givingCount = ratio;
+      candidates.push({ trade: { giving, givingCount, receiving: needed }, score });
+
+      // Also consider double trade if large surplus
+      if (player.resources[giving] >= ratio * 2 && !giveNeed) {
+        candidates.push({
+          trade: { giving, givingCount: ratio * 2, receiving: needed },
+          score: score + 1, // slight bonus for getting more
+        });
       }
     }
   }
 
-  return null;
+  if (candidates.length === 0) return null;
+
+  // Pick the best trade
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0].trade;
 }
 
 /**

@@ -412,8 +412,12 @@ function resourceMapsEqual(
 
 /**
  * Generate a counter-offer from a bot.
- * Uses personality-driven counter-offer chance.
- * Strategic: offers surplus resources, requests needed ones.
+ *
+ * Counter-offers vary based on:
+ * - What the proposer originally wanted (try to give them something they asked for)
+ * - What the bot actually needs and has surplus of
+ * - Offer more when bot has large surplus to make counters attractive
+ * - Some randomness to avoid being predictable
  */
 export function generateBotCounterOffer(
   state: GameState,
@@ -427,55 +431,108 @@ export function generateBotCounterOffer(
     return resourceMapsEqual(counter.offering, trade!.requesting) && resourceMapsEqual(counter.requesting, trade!.offering);
   }
 
-  // Personality-driven counter-offer chance
   let counterChance = 0.3;
   try {
     const context = computeStrategicContext(state, botIndex);
     counterChance = context.weights.counterOfferChance;
 
-    // VP gate: don't counter-offer to threatening players
+    // VP gate: don't counter-offer to someone about to win
     const fromVP = state.players[trade.fromPlayer].victoryPoints;
-    const botVP = context.ownVP;
-    if (fromVP >= context.vpToWin - 2) return null;
-    if (fromVP >= botVP + 2) return null;
-    if (fromVP > botVP && botVP < context.vpToWin - 2) return null;
+    if (fromVP >= context.vpToWin - 1) return null;
 
     if (Math.random() > counterChance) return null;
 
     const bot = state.players[botIndex];
 
-    // Strategic counter: offer surplus, request needed
-    if (context.buildGoal) {
-      const neededResources: Resource[] = [];
-      for (const [res, amount] of Object.entries(context.buildGoal.missingResources)) {
-        if ((amount || 0) > 0) neededResources.push(res as Resource);
+    // Build a scored list of what the bot can offer and what it wants
+    const canOffer: { res: Resource; surplus: number }[] = [];
+    const wants: { res: Resource; urgency: number }[] = [];
+
+    for (const r of ALL_RESOURCES) {
+      const have = bot.resources[r];
+      const goalNeed = context.buildGoal?.missingResources[r] ?? 0;
+      const spareAfterGoal = have - goalNeed;
+
+      if (spareAfterGoal >= 2) {
+        canOffer.push({ res: r, surplus: spareAfterGoal });
+      } else if (spareAfterGoal >= 1 && have >= 3) {
+        // Have 3+ total but goal needs some — can still spare 1
+        canOffer.push({ res: r, surplus: 1 });
       }
 
-      const surplusResources: Resource[] = ALL_RESOURCES.filter((r) => {
-        const goalNeed = context.buildGoal?.missingResources[r] ?? 0;
-        return bot.resources[r] > goalNeed + 1;
-      });
-
-      if (neededResources.length > 0 && surplusResources.length > 0) {
-        const giveRes = surplusResources[Math.floor(Math.random() * surplusResources.length)];
-        const wantRes = neededResources[Math.floor(Math.random() * neededResources.length)];
-        const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
-        if (isIdenticalToOriginal(counter)) return null;
-        return counter;
+      if (goalNeed > 0 && have < goalNeed) {
+        wants.push({ res: r, urgency: goalNeed - have });
       }
     }
 
-    // Fallback: bot offers a resource it has surplus of, requests one it lacks
-    // "surplus" = resources the bot has > 1, "scarce" = resources the bot has 0 of
-    const surplus = ALL_RESOURCES.filter((r) => bot.resources[r] > 1);
-    const scarce = ALL_RESOURCES.filter((r) => bot.resources[r] === 0);
+    // Fallback wants: resources with 0 count
+    if (wants.length === 0) {
+      for (const r of ALL_RESOURCES) {
+        if (bot.resources[r] === 0) wants.push({ res: r, urgency: 1 });
+      }
+    }
 
-    if (surplus.length === 0 || scarce.length === 0) return null;
+    if (canOffer.length === 0 || wants.length === 0) return null;
 
-    const giveRes = surplus[Math.floor(Math.random() * surplus.length)];
-    const wantRes = scarce[Math.floor(Math.random() * scarce.length)];
-    if (giveRes === wantRes) return null;
-    const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
+    // Strategy 1 (60%): Consider what the proposer originally wanted and try to accommodate
+    // This makes counter-offers feel more like a negotiation rather than ignoring the original trade
+    if (Math.random() < 0.6) {
+      // What did the proposer want? (trade.requesting = what proposer wants from us)
+      const proposerWants = ALL_RESOURCES.filter((r) => (trade.requesting[r] ?? 0) > 0);
+      // What was the proposer offering? (trade.offering = what proposer gives us)
+      const proposerOffering = ALL_RESOURCES.filter((r) => (trade.offering[r] ?? 0) > 0);
+
+      // Can we give them something they wanted?
+      const canGiveProposerWants = canOffer.filter((c) => proposerWants.includes(c.res));
+      // Do we want something they were offering?
+      const wantFromProposer = wants.filter((w) => proposerOffering.includes(w.res));
+
+      if (canGiveProposerWants.length > 0 && wantFromProposer.length > 0) {
+        // Counter with adjusted quantities — give them what they want but ask for what we need
+        const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
+        const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
+
+        // Offer more when we have big surplus
+        let giveAmount = 1;
+        if (give.surplus >= 4) giveAmount = 2;
+
+        const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+        if (!isIdenticalToOriginal(counter)) return counter;
+      }
+
+      // Can we give them something they wanted, but ask for something different?
+      if (canGiveProposerWants.length > 0 && wants.length > 0) {
+        const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
+        const want = wants[Math.floor(Math.random() * wants.length)];
+        if (give.res !== want.res) {
+          let giveAmount = 1;
+          if (give.surplus >= 4) giveAmount = 2;
+          const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+          if (!isIdenticalToOriginal(counter)) return counter;
+        }
+      }
+    }
+
+    // Strategy 2 (40% or fallback): Offer surplus for needs, independent of original trade
+    // Sort by highest surplus to give most attractive offer
+    canOffer.sort((a, b) => b.surplus - a.surplus);
+    // Sort wants by urgency
+    wants.sort((a, b) => b.urgency - a.urgency);
+
+    // Pick from top candidates with some randomness
+    const giveIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * canOffer.length);
+    const wantIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * wants.length);
+    const give = canOffer[giveIdx];
+    const want = wants[wantIdx];
+
+    if (give.res === want.res) return null;
+
+    // Offer more when surplus is large
+    let giveAmount = 1;
+    if (give.surplus >= 5) giveAmount = 3;
+    else if (give.surplus >= 3) giveAmount = 2;
+
+    const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
     if (isIdenticalToOriginal(counter)) return null;
     return counter;
   } catch {
@@ -511,7 +568,12 @@ function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: P
 
 /**
  * Decide whether a bot should accept or reject a pending trade offer.
- * Enhanced: uses build goal and personality weights for threshold.
+ *
+ * Uses a scoring system that weighs:
+ * - How much the bot needs what it's getting
+ * - How much the bot can spare what it's giving
+ * - The generosity of the offer (giving 3 cards for 1 is very attractive)
+ * - Personality (trader bots accept more freely)
  */
 export function decideBotTradeResponse(state: GameState, botIndex: number): "accept" | "reject" {
   const trade = state.pendingTrade;
@@ -531,7 +593,10 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
 
   // Check if bot can afford to give the requested resources
   for (const [res, amount] of Object.entries(trade.requesting)) {
-    if ((amount || 0) > bot.resources[res as Resource]) return "reject";
+    if ((amount || 0) > bot.resources[res as Resource]) {
+      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
+      return "reject";
+    }
   }
 
   // Compute context for enhanced evaluation
@@ -542,89 +607,100 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     // Fallback to basic evaluation
   }
 
-  // Reject trades that help threatening players
+  // Hard reject: never trade with someone about to win
+  if (context) {
+    const fromVP = state.players[trade.fromPlayer].victoryPoints;
+    const vpToWin = context.vpToWin;
+    if (fromVP >= vpToWin - 1) {
+      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
+      return "reject";
+    }
+  }
+
+  // --- Score-based evaluation ---
+  // Positive score = good trade, negative = bad trade
+  let score = 0;
+
+  // Count total cards exchanged
+  let totalGiving = 0;
+  let totalGaining = 0;
+  for (const amount of Object.values(trade.requesting)) totalGiving += (amount || 0);
+  for (const amount of Object.values(trade.offering)) totalGaining += (amount || 0);
+
+  // Generosity bonus: if they're offering more cards than requesting, that's attractive
+  // e.g., they offer 3 cards for 1 → generosity = 2
+  const generosity = totalGaining - totalGiving;
+  score += generosity * 2;
+
+  // Evaluate each resource we're gaining
+  for (const [res, amount] of Object.entries(trade.offering)) {
+    const amt = amount || 0;
+    if (amt === 0) continue;
+    const r = res as Resource;
+
+    if (context?.buildGoal) {
+      const missing = context.buildGoal.missingResources[r] ?? 0;
+      if (missing > 0) {
+        // We need this for our build goal — very valuable
+        score += Math.min(amt, missing) * 3;
+        // Extra cards beyond goal need are still nice
+        if (amt > missing) score += (amt - missing) * 1;
+      } else {
+        // Don't need it for build goal, but still a card
+        score += amt * 0.5;
+      }
+    } else {
+      // No build goal context: any resource we have 0 of is useful
+      if (bot.resources[r] === 0) score += amt * 2;
+      else score += amt * 0.5;
+    }
+  }
+
+  // Evaluate each resource we're giving away
+  for (const [res, amount] of Object.entries(trade.requesting)) {
+    const amt = amount || 0;
+    if (amt === 0) continue;
+    const r = res as Resource;
+
+    if (context?.buildGoal) {
+      const missing = context.buildGoal.missingResources[r] ?? 0;
+      const have = bot.resources[r];
+
+      if (missing > 0 && have - amt < missing) {
+        // Giving away something we need for our goal and won't have enough — painful
+        score -= amt * 3;
+      } else if (have - amt >= 2) {
+        // We'll still have plenty left — barely hurts
+        score -= amt * 0.3;
+      } else if (have - amt >= 1) {
+        // We'll have 1 left — moderate cost
+        score -= amt * 1;
+      } else {
+        // Giving away our last one
+        score -= amt * 1.5;
+      }
+    } else {
+      // No context: penalize based on how many we'll have left
+      const have = bot.resources[r];
+      if (have - amt <= 0) score -= amt * 2;
+      else if (have - amt === 1) score -= amt * 1;
+      else score -= amt * 0.5;
+    }
+  }
+
+  // VP penalty: slight reluctance to trade with leaders (but not a hard block)
   if (context) {
     const fromVP = state.players[trade.fromPlayer].victoryPoints;
     const botVP = context.ownVP;
-    const vpToWin = context.vpToWin;
-
-    // Never trade with someone close to winning (within 2 VP)
-    if (fromVP >= vpToWin - 2) {
-      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
-      return "reject";
-    }
-
-    // Never trade with someone ahead of you by 2+ VP — you're helping the leader
-    if (fromVP >= botVP + 2) {
-      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
-      return "reject";
-    }
-
-    // If they're ahead by 1 VP, only trade if you're also close to winning
-    // (both racing for the finish — trading is worth the risk)
-    if (fromVP > botVP && botVP < vpToWin - 2) {
-      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
-      return "reject";
-    }
+    if (fromVP >= botVP + 2) score -= 2;
+    else if (fromVP >= botVP + 1) score -= 0.5;
   }
 
-  // Simple need-based evaluation:
-  // - Does the bot need what it's getting?
-  // - Can the bot spare what it's giving?
-  // Accept only if gaining needed resources and not losing needed ones.
+  // Personality adjustment: trader personality has threshold -2 (accepts easier),
+  // aggressive has +1 (harder to please)
+  const threshold = context?.weights.tradeAcceptThreshold ?? 0;
+  const decision = score > threshold ? "accept" : "reject";
 
-  function isNeeded(res: Resource): boolean {
-    if (context?.buildGoal) {
-      return (context.buildGoal.missingResources[res] ?? 0) > 0;
-    }
-    // Fallback: check if any affordable build needs this resource
-    for (const { cost } of [
-      { cost: BUILDING_COSTS.settlement },
-      { cost: BUILDING_COSTS.city },
-      { cost: BUILDING_COSTS.road },
-      { cost: BUILDING_COSTS.developmentCard },
-    ]) {
-      const required = cost[res as keyof typeof cost] || 0;
-      if (required > 0 && bot.resources[res] < required) return true;
-    }
-    return false;
-  }
-
-  function isSurplus(res: Resource): boolean {
-    if (context?.buildGoal) {
-      const goalNeed = context.buildGoal.missingResources[res] ?? 0;
-      // Surplus if we have more than our goal needs
-      return bot.resources[res] > goalNeed;
-    }
-    // Fallback: surplus if we have 2+ and don't need it for any build
-    return bot.resources[res] >= 2 && !isNeeded(res);
-  }
-
-  // Check: are we getting at least one resource we need?
-  let gainingNeeded = false;
-  for (const [res, amount] of Object.entries(trade.offering)) {
-    if ((amount || 0) > 0 && isNeeded(res as Resource)) {
-      gainingNeeded = true;
-      break;
-    }
-  }
-
-  // Check: are we giving away anything we need (not surplus)?
-  let losingNeeded = false;
-  for (const [res, amount] of Object.entries(trade.requesting)) {
-    if ((amount || 0) > 0 && !isSurplus(res as Resource)) {
-      losingNeeded = true;
-      break;
-    }
-  }
-
-  // Accept if gaining something needed and only giving surplus
-  let decision: "accept" | "reject" = "reject";
-  if (gainingNeeded && !losingNeeded) {
-    decision = "accept";
-  }
-
-  // Record this trade + decision so we don't re-evaluate identical offers
   tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision });
   return decision;
 }
