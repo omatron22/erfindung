@@ -508,8 +508,8 @@ export function generateBotCounterOffer(
   }
 }
 
-// Per-turn trade memory to reject repeated identical trades (for responses)
-const tradeMemory = new Map<string, { tradeHash: string; turn: number }>();
+// Trade memory — bots remember their decision on identical trades for several turns
+const tradeMemory = new Map<string, { tradeHash: string; turn: number; decision: "accept" | "reject" }>();
 
 // Per-bot trade proposal memory — prevents bots from proposing the same trade repeatedly
 const proposedTradeMemory = new Map<number, { hash: string; turn: number }>();
@@ -530,12 +530,12 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   if (trade.fromPlayer === botIndex) return "reject";
   if (trade.toPlayer !== null && trade.toPlayer !== botIndex) return "reject";
 
-  // Reject repeated identical trades within the same turn
+  // Bots remember their decision on identical trades for several turns
   const memKey = `${botIndex}`;
   const tradeHash = getTradeHash(trade.offering, trade.requesting);
   const mem = tradeMemory.get(memKey);
-  if (mem && mem.tradeHash === tradeHash && mem.turn === state.turnNumber) {
-    return "reject";
+  if (mem && mem.tradeHash === tradeHash && state.turnNumber - mem.turn < 5) {
+    return mem.decision;
   }
 
   const bot = state.players[botIndex];
@@ -614,14 +614,14 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   const threshold = context?.weights.tradeAcceptThreshold ?? 0;
   const netBenefit = gainScore - lossScore;
 
+  let decision: "accept" | "reject" = "reject";
   if (netBenefit > threshold) {
-    // Record this trade in memory so we reject repeats
-    tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber });
-    return "accept";
+    decision = "accept";
+  } else if (netBenefit === threshold && Math.random() < 0.3) {
+    decision = "accept";
   }
-  if (netBenefit === threshold && Math.random() < 0.3) {
-    tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber });
-    return "accept";
-  }
-  return "reject";
+
+  // Record this trade + decision so we don't re-evaluate identical offers
+  tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision });
+  return decision;
 }
