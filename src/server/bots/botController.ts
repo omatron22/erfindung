@@ -477,10 +477,26 @@ export function generateBotCounterOffer(
   if (!trade) return null;
 
   // Check counter-offer memory: return cached result if same trade was already countered this turn
+  // BUT also verify the bot can still afford the counter (resources may have changed after a trade executed)
   const coTradeHash = getTradeHash(trade.offering, trade.requesting);
   const coMemKey = `${botIndex}-${coTradeHash}`;
   const coMem = counterOfferMemory.get(coMemKey);
   if (coMem && coMem.turn === state.turnNumber) {
+    // Validate the cached counter is still affordable
+    if (coMem.result) {
+      const bot = state.players[botIndex];
+      const canStillAfford = Object.entries(coMem.result.offering).every(
+        ([r, amt]) => (amt || 0) <= bot.resources[r as Resource]
+      );
+      const stillNeeds = Object.entries(coMem.result.requesting).some(
+        ([r, amt]) => (amt || 0) > 0 && bot.resources[r as Resource] < 3
+      );
+      if (!canStillAfford || !stillNeeds) {
+        // Resources changed (trade was executed) — clear cache, skip counter
+        counterOfferMemory.delete(coMemKey);
+        return null;
+      }
+    }
     return coMem.result;
   }
 
@@ -592,9 +608,7 @@ export function generateBotCounterOffer(
           const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
           const want = wantPool[Math.floor(Math.random() * wantPool.length)];
           if (give.res !== want.res) {
-            let giveAmount = 1;
-            if (give.surplus >= 4) giveAmount = 2;
-            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            const counter = { offering: { [give.res]: 1 }, requesting: { [want.res]: 1 } };
             if (!isIdenticalToOriginal(counter)) return counter;
           }
         }
@@ -615,10 +629,7 @@ export function generateBotCounterOffer(
           const give = alternativeOffers[0];
           const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
           if (give.res !== want.res) {
-            let giveAmount = 1;
-            if (give.surplus >= 4) giveAmount = 2;
-            if (give.surplus >= 6) giveAmount = 3;
-            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            const counter = { offering: { [give.res]: 1 }, requesting: { [want.res]: 1 } };
             if (!isIdenticalToOriginal(counter)) return counter;
           }
         }
@@ -635,9 +646,7 @@ export function generateBotCounterOffer(
           const give = relevantOffers[0];
           const want = relevantWants[Math.floor(Math.random() * relevantWants.length)];
           if (give.res !== want.res) {
-            let giveAmount = 1;
-            if (give.surplus >= 4) giveAmount = 2;
-            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            const counter = { offering: { [give.res]: 1 }, requesting: { [want.res]: 1 } };
             if (!isIdenticalToOriginal(counter)) return counter;
           }
         }
@@ -709,22 +718,21 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   if (trade.fromPlayer === botIndex) return "reject";
   if (trade.toPlayer !== null && trade.toPlayer !== botIndex) return "reject";
 
+  const bot = state.players[botIndex];
+
+  // Check if bot can afford to give the requested resources FIRST (before memory)
+  for (const [res, amount] of Object.entries(trade.requesting)) {
+    if ((amount || 0) > bot.resources[res as Resource]) {
+      return "reject";
+    }
+  }
+
   // Bots remember their decision on identical trades for several turns
   const memKey = `${botIndex}`;
   const tradeHash = getTradeHash(trade.offering, trade.requesting);
   const mem = tradeMemory.get(memKey);
   if (mem && mem.tradeHash === tradeHash && state.turnNumber - mem.turn < 5) {
     return mem.decision;
-  }
-
-  const bot = state.players[botIndex];
-
-  // Check if bot can afford to give the requested resources
-  for (const [res, amount] of Object.entries(trade.requesting)) {
-    if ((amount || 0) > bot.resources[res as Resource]) {
-      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
-      return "reject";
-    }
   }
 
   // Compute context for enhanced evaluation

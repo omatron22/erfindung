@@ -75,14 +75,11 @@ export function pickPlayerTrade(
   );
   if (!requestRes) return null;
 
-  // Offer more when we have big surplus to make trades more attractive
-  // 4+ surplus: offer 2, 6+ surplus: offer 3
-  let offerAmount = 1;
-  if (offerCount >= 6) offerAmount = 3;
-  else if (offerCount >= 4) offerAmount = 2;
-
+  // Always start with 1:1 offers — escalate only if previous offers were rejected
+  // The proposedTradeMemory in botController prevents re-sending the same trade,
+  // so bots will naturally try 1:1 first, then move on to other actions.
   return {
-    offering: { [offerRes]: offerAmount },
+    offering: { [offerRes]: 1 },
     requesting: { [requestRes]: 1 },
   };
 }
