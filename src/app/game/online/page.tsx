@@ -148,12 +148,12 @@ export default function OnlineGamePage() {
   // Reconnect after socket disconnect/reconnect (not on initial navigation from home page)
   const didMount = useRef(false);
   useEffect(() => {
-    if (!socket || !connected || gameState || !roomCode || !reconnectToken) return;
+    if (!socket || !connected || !roomCode || !reconnectToken) return;
     // Skip on first mount — we just navigated here from home page, socket is already in the room
     if (!didMount.current) { didMount.current = true; return; }
     // Socket reconnected (got a new ID) — rejoin the room
     socket.emit("room:join", { roomCode, playerName: "", reconnectToken });
-  }, [socket, connected, roomCode, reconnectToken, gameState]);
+  }, [socket, connected, roomCode, reconnectToken]);
 
   // --- Sound effects ---
   const prevPlayerRef = useRef<number | null>(null);

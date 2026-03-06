@@ -23,6 +23,8 @@ const io: TypedServer = new Server(httpServer, {
     origin: CORS_ORIGINS,
     methods: ["GET", "POST"],
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 io.on("connection", (socket: TypedSocket) => {
