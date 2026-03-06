@@ -73,6 +73,19 @@ export interface CancelTradeAction {
   tradeId: string;
 }
 
+export interface ConfirmTradeAction {
+  type: "confirm-trade";
+  playerIndex: number;
+  tradeId: string;
+  withPlayer: number; // which acceptor to trade with
+}
+
+export interface AcceptCounterOfferAction {
+  type: "accept-counter-offer";
+  playerIndex: number;
+  fromPlayer: number; // the player whose counter-offer to accept
+}
+
 export interface BankTradeAction {
   type: "bank-trade";
   playerIndex: number;
@@ -158,6 +171,8 @@ export type GameAction =
   | AcceptTradeAction
   | RejectTradeAction
   | CancelTradeAction
+  | ConfirmTradeAction
+  | AcceptCounterOfferAction
   | BankTradeAction
   | MoveRobberAction
   | StealResourceAction

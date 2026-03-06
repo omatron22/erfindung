@@ -16,6 +16,7 @@ export interface LobbyConfig {
 // Client → Server messages
 export interface ClientMessages {
   "game:action": { action: GameAction };
+  "game:counter-offer": { offering: Partial<Record<import("./game").Resource, number>>; requesting: Partial<Record<import("./game").Resource, number>> };
   "room:join": { roomCode: string; playerName: string; reconnectToken?: string };
   "room:leave": {};
   "room:add-bot": { difficulty: "easy" | "medium" | "hard"; personality?: string };
@@ -56,11 +57,18 @@ export interface LobbyPlayer {
  * Hides other players' development cards and resource counts
  * are shown but not specific cards.
  */
+export interface TradeResponseInfo {
+  playerIndex: number;
+  status: "pending" | "accepted" | "rejected";
+  counterOffer: { offering: Partial<Record<import("./game").Resource, number>>; requesting: Partial<Record<import("./game").Resource, number>> } | null;
+}
+
 export interface ClientGameState extends Omit<GameState, "players" | "developmentCardDeck"> {
   players: ClientPlayerState[];
   developmentCardDeckCount: number;
   myPlayerIndex: number;
   turnDeadline?: number | null;
+  tradeResponses?: Record<string, Record<number, TradeResponseInfo>> | null; // keyed by tradeId, then playerIndex
 }
 
 export interface ClientPlayerState extends Omit<PlayerState, "developmentCards" | "newDevelopmentCards"> {

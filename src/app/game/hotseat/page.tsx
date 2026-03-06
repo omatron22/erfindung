@@ -282,7 +282,7 @@ export default function GamePage() {
     // Bot-initiated trade: show trade UI to human
     if (action.type === "offer-trade") {
       const result = applyAction(state, action);
-      if (result.valid && result.newState && result.newState.pendingTrade) {
+      if (result.valid && result.newState && result.newState.pendingTrades.length > 0) {
         playTrade();
         setGameState(result.newState);
         startBotTradeOrchestration(result.newState, botIndex);
@@ -338,7 +338,7 @@ export default function GamePage() {
 
   // === BOT-INITIATED TRADE ORCHESTRATION ===
   function startBotTradeOrchestration(tradeState: GameState, initiatingBot: number) {
-    const trade = tradeState.pendingTrade;
+    const trade = tradeState.pendingTrades[0];
     if (!trade) return;
 
     const botResponses: Record<number, "pending" | "accepted" | "rejected"> = {};
@@ -377,7 +377,7 @@ export default function GamePage() {
 
   function canHumanAffordBotTrade(): boolean {
     if (!botTradeUI || !gameState) return false;
-    const trade = botTradeUI.tradeState.pendingTrade;
+    const trade = botTradeUI.tradeState.pendingTrades[0];
     if (!trade) return false;
     const human = gameState.players[HUMAN_PLAYER_INDEX];
     for (const [res, amount] of Object.entries(trade.requesting)) {
@@ -388,7 +388,7 @@ export default function GamePage() {
 
   function handleBotTradeAccept() {
     if (!botTradeUI) return;
-    const trade = botTradeUI.tradeState.pendingTrade;
+    const trade = botTradeUI.tradeState.pendingTrades[0];
     if (!trade) { setBotTradeUI(null); return; }
 
     // Validate human can afford to give the requested resources
@@ -398,27 +398,36 @@ export default function GamePage() {
       return;
     }
 
-    const result = applyAction(botTradeUI.tradeState, {
+    // Accept then confirm in sequence (new multi-trade model)
+    const acceptResult = applyAction(botTradeUI.tradeState, {
       type: "accept-trade",
       playerIndex: HUMAN_PLAYER_INDEX,
       tradeId: botTradeUI.tradeId,
     });
-    if (result.valid && result.newState) {
+    if (!acceptResult.valid || !acceptResult.newState) {
+      handleBotTradeReject();
+      return;
+    }
+    const confirmResult = applyAction(acceptResult.newState, {
+      type: "confirm-trade",
+      playerIndex: botTradeUI.initiatingBot,
+      tradeId: botTradeUI.tradeId,
+      withPlayer: HUMAN_PLAYER_INDEX,
+    });
+    if (confirmResult.valid && confirmResult.newState) {
       playTrade();
-      setGameState(result.newState);
+      setGameState(confirmResult.newState);
       const bot = botTradeUI.initiatingBot;
       setBotTradeUI(null);
-      // Continue bot's turn after trade
-      setTimeout(() => scheduleBotAction(result.newState!, bot, BOT_DELAY_MS), 400);
+      setTimeout(() => scheduleBotAction(confirmResult.newState!, bot, BOT_DELAY_MS), 400);
     } else {
-      // Trade failed — cancel and continue bot's turn
       handleBotTradeReject();
     }
   }
 
   function handleBotTradeReject() {
     if (!botTradeUI) return;
-    const trade = botTradeUI.tradeState.pendingTrade;
+    const trade = botTradeUI.tradeState.pendingTrades[0];
     if (!trade) { setBotTradeUI(null); return; }
 
     // Check if any other bot accepted — the initiating bot auto-picks the first acceptor
@@ -426,18 +435,26 @@ export default function GamePage() {
 
     if (acceptingBot) {
       const acceptorIdx = Number(acceptingBot[0]);
-      const result = applyAction(botTradeUI.tradeState, {
+      const acceptResult = applyAction(botTradeUI.tradeState, {
         type: "accept-trade",
         playerIndex: acceptorIdx,
         tradeId: botTradeUI.tradeId,
       });
-      if (result.valid && result.newState) {
-        playTrade();
-        setGameState(result.newState);
-        const bot = botTradeUI.initiatingBot;
-        setBotTradeUI(null);
-        setTimeout(() => scheduleBotAction(result.newState!, bot, BOT_DELAY_MS), 400);
-        return;
+      if (acceptResult.valid && acceptResult.newState) {
+        const confirmResult = applyAction(acceptResult.newState, {
+          type: "confirm-trade",
+          playerIndex: botTradeUI.initiatingBot,
+          tradeId: botTradeUI.tradeId,
+          withPlayer: acceptorIdx,
+        });
+        if (confirmResult.valid && confirmResult.newState) {
+          playTrade();
+          setGameState(confirmResult.newState);
+          const bot = botTradeUI.initiatingBot;
+          setBotTradeUI(null);
+          setTimeout(() => scheduleBotAction(confirmResult.newState!, bot, BOT_DELAY_MS), 400);
+          return;
+        }
       }
     }
 
@@ -451,7 +468,6 @@ export default function GamePage() {
       setGameState(cancelResult.newState);
       const bot = botTradeUI.initiatingBot;
       setBotTradeUI(null);
-      // Continue bot's turn after failed trade
       setTimeout(() => scheduleBotAction(cancelResult.newState!, bot, BOT_DELAY_MS), 400);
     } else {
       setBotTradeUI(null);
@@ -467,7 +483,7 @@ export default function GamePage() {
 
   // === SAFETY: clear stuck trade UI ===
   useEffect(() => {
-    if (!gameState?.pendingTrade) {
+    if (!gameState || gameState.pendingTrades.length === 0) {
       if (pendingTradeUI) {
         tradeTimersRef.current.forEach(clearTimeout);
         tradeTimersRef.current = [];
@@ -480,7 +496,7 @@ export default function GamePage() {
         setBotTradeUI(null);
       }
     }
-  }, [gameState?.pendingTrade]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gameState?.pendingTrades?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Comprehensive turn timer (hotseat local) ---
   const gameStateRef = useRef<GameState | null>(null);
@@ -614,7 +630,7 @@ export default function GamePage() {
 
   // === TRADE ORCHESTRATION ===
   function startTradeOrchestration(tradeState: GameState) {
-    const trade = tradeState.pendingTrade;
+    const trade = tradeState.pendingTrades[0];
     if (!trade) return;
 
     const responses: Record<number, "pending" | "accepted" | "rejected"> = {};
@@ -679,12 +695,17 @@ export default function GamePage() {
     if (!pendingTradeUI) return;
     tradeTimersRef.current.forEach(clearTimeout);
     tradeTimersRef.current = [];
-    const result = applyAction(pendingTradeUI.tradeState, { type: "accept-trade", playerIndex: botIndex, tradeId: pendingTradeUI.tradeId });
-    if (result.valid && result.newState) {
-      playTrade();
-      setGameState(result.newState);
+    const acceptResult = applyAction(pendingTradeUI.tradeState, { type: "accept-trade", playerIndex: botIndex, tradeId: pendingTradeUI.tradeId });
+    if (acceptResult.valid && acceptResult.newState) {
+      const confirmResult = applyAction(acceptResult.newState, { type: "confirm-trade", playerIndex: HUMAN_PLAYER_INDEX, tradeId: pendingTradeUI.tradeId, withPlayer: botIndex });
+      if (confirmResult.valid && confirmResult.newState) {
+        playTrade();
+        setGameState(confirmResult.newState);
+      } else {
+        const cancel = applyAction(acceptResult.newState, { type: "cancel-trade", playerIndex: HUMAN_PLAYER_INDEX, tradeId: pendingTradeUI.tradeId });
+        if (cancel.valid && cancel.newState) setGameState(cancel.newState);
+      }
     } else {
-      // Accept failed — cancel the pending trade so state isn't stuck
       const cancel = applyAction(pendingTradeUI.tradeState, { type: "cancel-trade", playerIndex: HUMAN_PLAYER_INDEX, tradeId: pendingTradeUI.tradeId });
       if (cancel.valid && cancel.newState) setGameState(cancel.newState);
     }
@@ -717,10 +738,14 @@ export default function GamePage() {
     if (!cancelResult.valid || !cancelResult.newState) { setPendingTradeUI(null); gameViewRef.current?.closeTrade(); return; }
 
     const offerResult = applyAction(cancelResult.newState, { type: "offer-trade", playerIndex: HUMAN_PLAYER_INDEX, offering: counter.requesting, requesting: counter.offering, toPlayer: botIndex });
-    if (!offerResult.valid || !offerResult.newState || !offerResult.newState.pendingTrade) { setPendingTradeUI(null); gameViewRef.current?.closeTrade(); return; }
+    if (!offerResult.valid || !offerResult.newState || offerResult.newState.pendingTrades.length === 0) { setPendingTradeUI(null); gameViewRef.current?.closeTrade(); return; }
 
-    const acceptResult = applyAction(offerResult.newState, { type: "accept-trade", playerIndex: botIndex, tradeId: offerResult.newState.pendingTrade.id });
-    if (acceptResult.valid && acceptResult.newState) { playTrade(); setGameState(acceptResult.newState); }
+    const newTrade = offerResult.newState.pendingTrades[offerResult.newState.pendingTrades.length - 1];
+    const acceptResult = applyAction(offerResult.newState, { type: "accept-trade", playerIndex: botIndex, tradeId: newTrade.id });
+    if (acceptResult.valid && acceptResult.newState) {
+      const confirmResult = applyAction(acceptResult.newState, { type: "confirm-trade", playerIndex: HUMAN_PLAYER_INDEX, tradeId: newTrade.id, withPlayer: botIndex });
+      if (confirmResult.valid && confirmResult.newState) { playTrade(); setGameState(confirmResult.newState); }
+    }
     setPendingTradeUI(null);
     gameViewRef.current?.closeTrade();
   }
@@ -844,8 +869,8 @@ export default function GamePage() {
   }
 
   // Bot-initiated trade overlay
-  const botTradeOverlayNode = botTradeUI && gameState.pendingTrade ? (() => {
-    const trade = gameState.pendingTrade;
+  const botTradeOverlayNode = botTradeUI && gameState.pendingTrades.length > 0 ? (() => {
+    const trade = gameState.pendingTrades[0];
     const bot = gameState.players[botTradeUI.initiatingBot];
     const botColor = PLAYER_COLOR_HEX[bot.color];
     const humanCanAfford = canHumanAffordBotTrade();
@@ -909,7 +934,7 @@ export default function GamePage() {
     pendingTradeUI.acceptors.length === 0 &&
     !Object.values(pendingTradeUI.counterOffers).some((c) => c != null);
 
-  const tradeOverlayNode = pendingTradeUI && gameState.pendingTrade ? (
+  const tradeOverlayNode = pendingTradeUI && gameState.pendingTrades.length > 0 ? (
     <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-3 py-2 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 import type { Server, Socket } from "socket.io";
-import type { GameState } from "@/shared/types/game";
-import type { ClientMessages, ServerMessages, LobbyConfig } from "@/shared/types/messages";
+import type { GameState, Resource } from "@/shared/types/game";
+import type { ClientMessages, ServerMessages, LobbyConfig, TradeResponseInfo } from "@/shared/types/messages";
 import type { GameConfig, BuildingStyle, BotPersonality } from "@/shared/types/config";
 
 export interface PlayerSlot {
@@ -25,6 +25,8 @@ export interface Room {
   botTimers: NodeJS.Timeout[];
   turnTimer: NodeJS.Timeout | null;
   turnDeadline: number | null; // timestamp
+  tradeTimer: NodeJS.Timeout | null;
+  tradeResponses: Record<string, Record<number, TradeResponseInfo>> | null; // keyed by tradeId, then playerIndex
   createdAt: number;
 }
 

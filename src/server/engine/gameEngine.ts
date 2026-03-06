@@ -95,7 +95,7 @@ export function createGame(id: string, playerNames: string[], config?: GameConfi
     turnNumber: 0,
     lastDiceRoll: null,
     developmentCardDeck: devDeck,
-    pendingTrade: null,
+    pendingTrades: [],
     discardingPlayers: [],
     setupPlacementsMade: 0,
     startingPlayerIndex,
@@ -170,6 +170,8 @@ export function applyAction(state: GameState, action: GameAction): ActionResult 
         return handleRejectTrade(state, action.playerIndex, action.tradeId);
       case "cancel-trade":
         return handleCancelTrade(state, action.playerIndex, action.tradeId);
+      case "confirm-trade":
+        return handleConfirmTrade(state, action.playerIndex, action.tradeId, action.withPlayer);
       case "bank-trade":
         return handleBankTrade(state, action.playerIndex, action.giving, action.givingCount, action.receiving);
       case "move-robber":
@@ -649,9 +651,8 @@ function handleOfferTrade(
   if (state.phase !== "main") return { valid: false, error: "Not in main phase" };
   if (playerIndex !== state.currentPlayerIndex) return { valid: false, error: "Not your turn" };
   if (state.turnPhase !== "trade-or-build") return { valid: false, error: "Cannot trade now" };
-  if (state.pendingTrade) return { valid: false, error: "Trade already pending" };
 
-  // Validate player has the resources
+  // Validate player has the resources for this trade
   const player = state.players[playerIndex];
   for (const [res, amount] of Object.entries(offering)) {
     if ((amount || 0) > player.resources[res as Resource]) {
@@ -660,40 +661,79 @@ function handleOfferTrade(
   }
 
   const newState = cloneState(state);
-  newState.pendingTrade = {
-    id: `trade-${Date.now()}`,
+  newState.pendingTrades.push({
+    id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     fromPlayer: playerIndex,
     toPlayer,
     offering: offering,
     requesting: requesting,
     status: "pending",
-  };
+    acceptedBy: [],
+  });
 
   return { valid: true, newState, events: [] };
 }
 
 function handleAcceptTrade(state: GameState, playerIndex: number, tradeId: string): ActionResult {
-  if (!state.pendingTrade || state.pendingTrade.id !== tradeId) {
+  const trade = state.pendingTrades.find((t) => t.id === tradeId);
+  if (!trade) {
     return { valid: false, error: "No matching trade" };
   }
-  if (playerIndex === state.pendingTrade.fromPlayer) {
+  if (playerIndex === trade.fromPlayer) {
     return { valid: false, error: "Cannot accept your own trade" };
   }
-  if (state.pendingTrade.toPlayer !== null && state.pendingTrade.toPlayer !== playerIndex) {
+  if (trade.toPlayer !== null && trade.toPlayer !== playerIndex) {
     return { valid: false, error: "Trade not offered to you" };
   }
+  if (trade.acceptedBy.includes(playerIndex)) {
+    return { valid: false, error: "Already accepted" };
+  }
 
+  // Validate accepter has the resources
   const accepter = state.players[playerIndex];
-  for (const [res, amount] of Object.entries(state.pendingTrade.requesting)) {
+  for (const [res, amount] of Object.entries(trade.requesting)) {
     if ((amount || 0) > accepter.resources[res as Resource]) {
       return { valid: false, error: `Not enough ${res}` };
     }
   }
 
   const newState = cloneState(state);
-  const trade = newState.pendingTrade!;
+  const t = newState.pendingTrades.find((t) => t.id === tradeId)!;
+  t.acceptedBy.push(playerIndex);
+
+  return { valid: true, newState, events: [] };
+}
+
+/** Initiator confirms an accepted trade — executes the swap and clears all pending trades */
+function handleConfirmTrade(state: GameState, playerIndex: number, tradeId: string, withPlayer: number): ActionResult {
+  const trade = state.pendingTrades.find((t) => t.id === tradeId);
+  if (!trade) {
+    return { valid: false, error: "No matching trade" };
+  }
+  if (playerIndex !== trade.fromPlayer) {
+    return { valid: false, error: "Only the offerer can confirm" };
+  }
+  if (!trade.acceptedBy.includes(withPlayer)) {
+    return { valid: false, error: "That player hasn't accepted" };
+  }
+
+  // Re-validate both players have the resources at confirm time
+  const offerer = state.players[playerIndex];
+  for (const [res, amount] of Object.entries(trade.offering)) {
+    if ((amount || 0) > offerer.resources[res as Resource]) {
+      return { valid: false, error: `You no longer have enough ${res}` };
+    }
+  }
+  const accepter = state.players[withPlayer];
+  for (const [res, amount] of Object.entries(trade.requesting)) {
+    if ((amount || 0) > accepter.resources[res as Resource]) {
+      return { valid: false, error: `${accepter.name} no longer has enough ${res}` };
+    }
+  }
+
+  const newState = cloneState(state);
   const from = newState.players[trade.fromPlayer];
-  const to = newState.players[playerIndex];
+  const to = newState.players[withPlayer];
 
   // Transfer resources
   for (const [res, amount] of Object.entries(trade.offering)) {
@@ -709,10 +749,11 @@ function handleAcceptTrade(state: GameState, playerIndex: number, tradeId: strin
     }
   }
 
-  newState.pendingTrade = null;
+  // Clear all pending trades
+  newState.pendingTrades = [];
 
   const events: GameEvent[] = [
-    { type: "trade-completed", playerIndex: trade.fromPlayer, data: { with: playerIndex } },
+    { type: "trade-completed", playerIndex: trade.fromPlayer, data: { with: withPlayer } },
   ];
 
   newState.log.push({
@@ -726,26 +767,30 @@ function handleAcceptTrade(state: GameState, playerIndex: number, tradeId: strin
 }
 
 function handleRejectTrade(state: GameState, playerIndex: number, tradeId: string): ActionResult {
-  if (!state.pendingTrade || state.pendingTrade.id !== tradeId) {
+  const trade = state.pendingTrades.find((t) => t.id === tradeId);
+  if (!trade) {
     return { valid: false, error: "No matching trade" };
   }
 
+  // Just remove the rejector from acceptedBy if they were there
   const newState = cloneState(state);
-  newState.pendingTrade = null;
+  const t = newState.pendingTrades.find((t) => t.id === tradeId)!;
+  t.acceptedBy = t.acceptedBy.filter((i) => i !== playerIndex);
 
   return { valid: true, newState, events: [] };
 }
 
 function handleCancelTrade(state: GameState, playerIndex: number, tradeId: string): ActionResult {
-  if (!state.pendingTrade || state.pendingTrade.id !== tradeId) {
+  const trade = state.pendingTrades.find((t) => t.id === tradeId);
+  if (!trade) {
     return { valid: false, error: "No matching trade" };
   }
-  if (playerIndex !== state.pendingTrade.fromPlayer) {
+  if (playerIndex !== trade.fromPlayer) {
     return { valid: false, error: "Only the offerer can cancel" };
   }
 
   const newState = cloneState(state);
-  newState.pendingTrade = null;
+  newState.pendingTrades = newState.pendingTrades.filter((t) => t.id !== tradeId);
 
   return { valid: true, newState, events: [] };
 }
@@ -853,10 +898,24 @@ function handleMoveRobber(state: GameState, playerIndex: number, hex: HexKey): A
 
   const events: GameEvent[] = [{ type: "robber-moved", playerIndex, data: { hex } }];
 
+  // Find all players with buildings on the robber hex (to announce who got blocked)
+  const parsedRobberHex = parseHexKey(hex);
+  const blockedNames = new Set<string>();
+  for (const vk of hexVertices(parsedRobberHex)) {
+    const building = newState.board.vertices[vk];
+    if (building && building.playerIndex !== playerIndex) {
+      blockedNames.add(newState.players[building.playerIndex].name);
+    }
+  }
+  const blockedList = Array.from(blockedNames);
+  const robberMsg = blockedList.length > 0
+    ? `${newState.players[playerIndex].name} moved the robber, blocking ${blockedList.join(" and ")}`
+    : `${newState.players[playerIndex].name} moved the robber`;
+
   newState.log.push({
     timestamp: Date.now(),
     playerIndex,
-    message: `${newState.players[playerIndex].name} moved the robber`,
+    message: robberMsg,
     type: "action",
   });
 
@@ -1208,6 +1267,15 @@ function destroyStructuresOnNumber(state: GameState, number: number, instigatorI
   const destroyedVertices = new Set<string>();
   const destroyedEdges = new Set<string>();
 
+  // Track destruction per player: { playerIndex: { settlements, cities, roads } }
+  const destructionByPlayer = new Map<number, { settlements: number; cities: number; roads: number }>();
+  const getPlayerDestruction = (pidx: number) => {
+    if (!destructionByPlayer.has(pidx)) {
+      destructionByPlayer.set(pidx, { settlements: 0, cities: 0, roads: 0 });
+    }
+    return destructionByPlayer.get(pidx)!;
+  };
+
   // Find all hexes with this number
   for (const [hk, hex] of Object.entries(state.board.hexes)) {
     if (hex.number !== number) continue;
@@ -1225,18 +1293,13 @@ function destroyStructuresOnNumber(state: GameState, number: number, instigatorI
       if (building.type === "settlement") {
         owner.settlements = owner.settlements.filter((v) => v !== vk);
         owner.victoryPoints -= 1;
+        getPlayerDestruction(owner.index).settlements += 1;
       } else if (building.type === "city") {
         owner.cities = owner.cities.filter((v) => v !== vk);
         owner.victoryPoints -= 2;
+        getPlayerDestruction(owner.index).cities += 1;
       }
       state.board.vertices[vk] = null;
-
-      state.log.push({
-        timestamp: Date.now(),
-        playerIndex: owner.index,
-        message: `${owner.name}'s ${building.type} was destroyed by sheep nuke!`,
-        type: "action",
-      });
     }
 
     // Destroy roads on edges of this hex
@@ -1249,14 +1312,48 @@ function destroyStructuresOnNumber(state: GameState, number: number, instigatorI
       const owner = state.players[road.playerIndex];
       owner.roads = owner.roads.filter((e) => e !== ek);
       state.board.edges[ek] = null;
-
-      state.log.push({
-        timestamp: Date.now(),
-        playerIndex: owner.index,
-        message: `${owner.name}'s road was destroyed by sheep nuke!`,
-        type: "action",
-      });
+      getPlayerDestruction(owner.index).roads += 1;
     }
+  }
+
+  // Log per-player destruction summaries with commentary
+  const mildComments = ["took a hit", "felt that one", "needs a moment"];
+  const mediumComments = ["got rekt", "is in shambles", "won't recover from that easily"];
+  const severeComments = ["is absolutely cooked", "'s empire crumbled to dust", "needs to call 911"];
+
+  for (const [pidx, counts] of destructionByPlayer) {
+    const name = state.players[pidx].name;
+    const totalLost = counts.settlements + counts.cities + counts.roads;
+
+    // Build the "lost X and Y" summary
+    const parts: string[] = [];
+    if (counts.settlements > 0) parts.push(`${counts.settlements} settlement${counts.settlements > 1 ? "s" : ""}`);
+    if (counts.cities > 0) parts.push(`${counts.cities} cit${counts.cities > 1 ? "ies" : "y"}`);
+    if (counts.roads > 0) parts.push(`${counts.roads} road${counts.roads > 1 ? "s" : ""}`);
+
+    state.log.push({
+      timestamp: Date.now(),
+      playerIndex: pidx,
+      message: `${name} lost ${parts.join(" and ")} to the sheep nuke!`,
+      type: "action",
+    });
+
+    // Pick a funny comment based on severity
+    let comment: string;
+    if (totalLost <= 2) {
+      comment = mildComments[Math.floor(Math.random() * mildComments.length)];
+    } else if (totalLost <= 4) {
+      comment = mediumComments[Math.floor(Math.random() * mediumComments.length)];
+    } else {
+      comment = severeComments[Math.floor(Math.random() * severeComments.length)];
+    }
+
+    state.log.push({
+      timestamp: Date.now(),
+      playerIndex: pidx,
+      message: `${name} ${comment}`,
+      type: "action",
+    });
   }
 
   // Update port access for all affected players
@@ -1324,8 +1421,8 @@ function handleEndTurn(state: GameState, playerIndex: number): ActionResult {
   player.newDevelopmentCards = [];
   player.hasPlayedDevCardThisTurn = false;
 
-  // Cancel any pending trade
-  newState.pendingTrade = null;
+  // Cancel any pending trades
+  newState.pendingTrades = [];
 
   // Reset free nuke
   newState.freeNukeAvailable = false;

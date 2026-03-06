@@ -5,7 +5,7 @@ import type { BuildingStyle } from "@/shared/types/config";
 import { BUILDING_STYLES, TURN_TIMER_OPTIONS, VP_OPTIONS, BOT_PERSONALITIES } from "@/shared/types/config";
 import type { BotPersonality } from "@/shared/types/config";
 import { PLAYER_COLORS } from "@/shared/types/game";
-import { handleStartGame, handleGameAction, scheduleBotActions, broadcastState } from "./gameSession.js";
+import { handleStartGame, handleGameAction, handleCounterOffer, scheduleBotActions, broadcastState } from "./gameSession.js";
 import { filterStateForPlayer } from "./stateFilter.js";
 
 const DEFAULT_LOBBY_CONFIG: LobbyConfig = {
@@ -141,6 +141,14 @@ export function handleConnection(io: TypedServer, socket: TypedSocket) {
     handleGameAction(io, socket, action);
   });
 
+  socket.on("game:counter-offer", ({ offering, requesting }) => {
+    const room = getRoomForSocket(socket.id);
+    if (!room || !room.gameState) return;
+    const slot = getPlayerSlot(room, socket.id);
+    if (!slot) return;
+    handleCounterOffer(io, room, slot.index, offering, requesting);
+  });
+
   socket.on("chat:message", ({ text }) => {
     handleChat(io, socket, text);
   });
@@ -181,6 +189,8 @@ function handleJoin(
       botTimers: [],
       turnTimer: null,
       turnDeadline: null,
+      tradeTimer: null,
+      tradeResponses: null,
       createdAt: Date.now(),
     };
     rooms.set(code, room);
@@ -346,6 +356,7 @@ function removePlayerBySlot(io: TypedServer, room: Room, slot: PlayerSlot) {
     if (rooms.has(room.code)) {
       room.botTimers.forEach(clearTimeout);
       if (room.turnTimer) clearTimeout(room.turnTimer);
+      if (room.tradeTimer) clearTimeout(room.tradeTimer);
       rooms.delete(room.code);
     }
     return;
@@ -501,6 +512,7 @@ function checkAllHumansGone(io: TypedServer, room: Room): boolean {
     // End session — clean up timers and delete room
     room.botTimers.forEach(clearTimeout);
     if (room.turnTimer) clearTimeout(room.turnTimer);
+    if (room.tradeTimer) clearTimeout(room.tradeTimer);
     io.to(room.code).emit("room:session-ended", { reason: "All players have left" });
     rooms.delete(room.code);
     return true;

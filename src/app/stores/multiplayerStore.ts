@@ -2,6 +2,31 @@ import { create } from "zustand";
 import type { ClientGameState, LobbyPlayer, LobbyConfig } from "@/shared/types/messages";
 import type { GameEvent } from "@/shared/types/actions";
 
+const SESSION_KEY = "catan-session";
+
+interface SessionData {
+  roomCode: string;
+  playerIndex: number;
+  reconnectToken: string;
+}
+
+function saveSession(data: SessionData | null) {
+  try {
+    if (data) localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+    else localStorage.removeItem(SESSION_KEY);
+  } catch {}
+}
+
+function loadSession(): SessionData | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.roomCode && data.reconnectToken != null && data.playerIndex != null) return data;
+  } catch {}
+  return null;
+}
+
 interface MultiplayerStore {
   // Connection state
   roomCode: string | null;
@@ -36,9 +61,10 @@ interface MultiplayerStore {
   setConnected: (connected: boolean) => void;
   addChatMessage: (msg: { playerIndex: number; playerName: string; text: string; timestamp: number }) => void;
   reset: () => void;
+  restoreSession: () => boolean;
 }
 
-export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
+export const useMultiplayerStore = create<MultiplayerStore>((set, get) => ({
   roomCode: null,
   playerIndex: null,
   reconnectToken: null,
@@ -52,10 +78,9 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
   chatMessages: [],
 
   setRoomJoined: (roomCode, playerIndex, reconnectToken) => {
-    // Store reconnect token in localStorage for persistence
-    try {
-      localStorage.setItem(`catan-reconnect-${roomCode}`, reconnectToken);
-    } catch {}
+    saveSession({ roomCode, playerIndex, reconnectToken });
+    // Also keep legacy key for join page compat
+    try { localStorage.setItem(`catan-reconnect-${roomCode}`, reconnectToken); } catch {}
     set({ roomCode, playerIndex, reconnectToken, error: null });
   },
 
@@ -73,7 +98,8 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
   addChatMessage: (msg) =>
     set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
 
-  reset: () =>
+  reset: () => {
+    saveSession(null);
     set({
       roomCode: null,
       playerIndex: null,
@@ -85,5 +111,17 @@ export const useMultiplayerStore = create<MultiplayerStore>((set) => ({
       lastEvents: [],
       error: null,
       chatMessages: [],
-    }),
+    });
+  },
+
+  restoreSession: () => {
+    const session = loadSession();
+    if (!session) return false;
+    set({
+      roomCode: session.roomCode,
+      playerIndex: session.playerIndex,
+      reconnectToken: session.reconnectToken,
+    });
+    return true;
+  },
 }));

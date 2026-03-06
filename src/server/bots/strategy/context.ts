@@ -21,6 +21,14 @@ export interface PlayerThreat {
   devCardCount: number;
   roadLength: number;
   knightsPlayed: number;
+  /** Total production rate (expected resources/turn) */
+  totalProduction: number;
+  /** Per-resource production rates */
+  productionRates: Record<Resource, number>;
+  /** Whether this player produces both ore and grain */
+  hasCityResources: boolean;
+  /** Whether this player has any port access */
+  hasPortAccess: boolean;
 }
 
 export interface BuildGoal {
@@ -156,6 +164,45 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
       threatScore += 1.5;
     }
 
+    // --- Production quality: compute opponent's production rates ---
+    const opponentProduction: Record<Resource, number> = { brick: 0, lumber: 0, ore: 0, grain: 0, wool: 0 };
+    for (const [hk, hex] of Object.entries(state.board.hexes)) {
+      if (!hex.number || hex.hasRobber) continue;
+      const resource = TERRAIN_RESOURCE[hex.terrain];
+      if (!resource) continue;
+      const dots = NUMBER_DOTS[hex.number] || 0;
+      const probability = dots / 36;
+      const verts = hexVertices(hex.coord);
+      for (const vk of verts) {
+        const building = state.board.vertices[vk];
+        if (!building || building.playerIndex !== i) continue;
+        const multiplier = building.type === "city" ? 2 : 1;
+        opponentProduction[resource] += probability * multiplier;
+      }
+    }
+
+    const totalProduction = Object.values(opponentProduction).reduce((s, v) => s + v, 0);
+    const hasCityResources = opponentProduction.ore > 0 && opponentProduction.grain > 0;
+    const hasPortAccess = p.portsAccess.length > 0;
+
+    // Production quality bonus: scale by how much better than average (0.8 res/turn baseline)
+    const productionBonus = Math.max(0, (totalProduction - 0.8) * 1.5);
+    threatScore += productionBonus;
+
+    // Resource complementarity: ore+grain combo is threatening (city potential)
+    if (hasCityResources) {
+      // Stronger bonus if both rates are meaningful
+      const cityCombo = Math.min(opponentProduction.ore, opponentProduction.grain);
+      threatScore += cityCombo * 2;
+    }
+
+    // Port access bonus: ports make resource conversion efficient
+    if (hasPortAccess) {
+      // Specific resource ports are more threatening
+      const specificPorts = p.portsAccess.filter((pt) => pt !== "any").length;
+      threatScore += specificPorts * 0.5 + (p.portsAccess.includes("any") ? 0.3 : 0);
+    }
+
     playerThreats.push({
       playerIndex: i,
       threatScore,
@@ -163,6 +210,10 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
       devCardCount,
       roadLength: roadLen,
       knightsPlayed: p.knightsPlayed,
+      totalProduction,
+      productionRates: opponentProduction,
+      hasCityResources,
+      hasPortAccess,
     });
   }
 

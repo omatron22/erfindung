@@ -120,6 +120,7 @@ export interface TradeOffer {
   offering: Partial<Record<Resource, number>>;
   requesting: Partial<Record<Resource, number>>;
   status: "pending" | "accepted" | "rejected" | "countered" | "cancelled";
+  acceptedBy: number[]; // players who have accepted this offer (initiator must confirm)
 }
 
 export interface GameState {
@@ -132,7 +133,7 @@ export interface GameState {
   turnNumber: number;
   lastDiceRoll: DiceRoll | null;
   developmentCardDeck: DevelopmentCardType[];
-  pendingTrade: TradeOffer | null;
+  pendingTrades: TradeOffer[];
   discardingPlayers: number[]; // player indices who still need to discard
   setupPlacementsMade: number; // tracks setup progress
   startingPlayerIndex: number; // randomized first player

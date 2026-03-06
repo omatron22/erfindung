@@ -380,11 +380,25 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     });
   }
 
+  // --- Shake message for blocked trade resources ---
+  const [tradeShakeMessage, setTradeShakeMessage] = useState<string | null>(null);
+  const shakeMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // --- Requesting resource (with optional hotseat validation guard) ---
   // Skip the guard for bank trades — the bank has unlimited resources
   function handleAddToRequesting(resource: Resource) {
     const isBankTrade = !!trade.getBankTradeInfo();
-    if (!isBankTrade && onAddToRequesting && !onAddToRequesting(resource)) return;
+    if (!isBankTrade && onAddToRequesting && !onAddToRequesting(resource)) {
+      // Trigger shake animation on the blocked resource button
+      trade.setShakenResource(null);
+      requestAnimationFrame(() => trade.setShakenResource(resource));
+      setTimeout(() => trade.setShakenResource(null), 400);
+      // Show brief "nobody has this" message
+      if (shakeMessageTimerRef.current) clearTimeout(shakeMessageTimerRef.current);
+      setTradeShakeMessage(`Nobody has ${RESOURCE_LABELS[resource]}`);
+      shakeMessageTimerRef.current = setTimeout(() => setTradeShakeMessage(null), 1500);
+      return;
+    }
     trade.addToRequesting(resource);
   }
 
@@ -444,6 +458,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
   }
 
   const myResources = Object.entries(myPlayer.resources) as [Resource, number][];
+  const totalCards = myResources.reduce((sum, [, count]) => sum + count, 0);
   const opponents = gameState.players.filter((p) => p.index !== myPlayerIndex);
 
   // Bank resources: 19 total per type minus all players' holdings
@@ -543,18 +558,23 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
                 <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-3 py-2.5 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
                   <div className="flex flex-col gap-2">
                     {/* Resource selector buttons (top row) — adds to requesting */}
-                    <div className="flex gap-1.5 justify-center">
-                      {ALL_RESOURCES.map((res) => (
-                        <button
-                          key={res}
-                          onClick={() => handleAddToRequesting(res)}
-                          className={`w-8 h-8 flex items-center justify-center border-2 border-[#8b7355] hover:border-amber-500 hover:scale-110 transition-all${trade.shakenResource === res ? " res-shake" : ""}`}
-                          style={{ backgroundColor: RESOURCE_COLORS[res] }}
-                          title={`Request ${RESOURCE_LABELS[res]}`}
-                        >
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex gap-1.5 justify-center">
+                        {ALL_RESOURCES.map((res) => (
+                          <button
+                            key={res}
+                            onClick={() => handleAddToRequesting(res)}
+                            className={`w-8 h-8 flex items-center justify-center border-2 border-[#8b7355] hover:border-amber-500 hover:scale-110 transition-all${trade.shakenResource === res ? " res-shake" : ""}`}
+                            style={{ backgroundColor: RESOURCE_COLORS[res] }}
+                            title={`Request ${RESOURCE_LABELS[res]}`}
+                          >
                           <ResourceIcon resource={res} size={16} />
                         </button>
-                      ))}
+                        ))}
+                      </div>
+                      {tradeShakeMessage && (
+                        <span className="font-pixel text-[7px] text-red-600 animate-pulse">{tradeShakeMessage}</span>
+                      )}
                     </div>
 
                     {/* Requesting row (what you want — top) */}
@@ -704,7 +724,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
 
         {/* Bottom bar — cobblestone wall + safe area extension */}
         <div
-          className="h-16 md:h-20 flex-shrink-0 flex items-center px-2 gap-1 md:gap-2 relative overflow-x-auto"
+          className="h-[4.5rem] md:h-20 flex-shrink-0 flex items-center px-2 gap-1 md:gap-2 relative overflow-x-auto"
           style={{
             paddingBottom: "env(safe-area-inset-bottom, 0px)",
             backgroundColor: "#6b5840",
@@ -828,7 +848,10 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
             ))}
           </div>
 
-
+          {/* Mobile total card count badge */}
+          <div className="md:hidden shrink-0 flex items-center justify-center bg-[#433020] border-2 border-[#2a1a0a] rounded px-1.5 py-0.5 ml-1">
+            <span className="font-pixel text-[8px] text-white">{totalCards}</span>
+          </div>
 
           {/* Spacer */}
           <div className="flex-1" />

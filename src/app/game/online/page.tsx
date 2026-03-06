@@ -94,7 +94,9 @@ export default function OnlineGamePage() {
     const onState = ({ state }: { state: ClientGameState }) => store().setGameState(state);
     const onEvents = ({ events }: { events: import("@/shared/types/actions").GameEvent[] }) => store().setEvents(events);
     const onError = ({ message }: { message: string }) => {
-      if (message === "Room not found") { store().reset(); router.push("/"); return; }
+      if (message === "Room not found" || message === "Game already in progress") {
+        store().reset(); router.push("/"); return;
+      }
       setLocalError(message); setTimeout(() => setLocalError(null), 3000);
     };
     const onLobby = (data: { players: LobbyPlayer[]; config: LobbyConfig; hostIndex: number }) => store().setLobbyState(data);
@@ -121,10 +123,13 @@ export default function OnlineGamePage() {
   }, [socket]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // If room was lost after being in one (e.g. session ended), go home
+  // But don't redirect during the initial restore window
   const hasEverHadRoom = useRef(!!roomCode);
+  const mountTime = useRef(Date.now());
   useEffect(() => {
     if (roomCode) { hasEverHadRoom.current = true; return; }
-    if (hasEverHadRoom.current) { router.push("/"); }
+    // Give 2s for session restore before redirecting
+    if (hasEverHadRoom.current && Date.now() - mountTime.current > 2000) { router.push("/"); }
   }, [roomCode, router]);
 
   // Request lobby/game state on mount (the broadcast from room creation may have
@@ -145,12 +150,29 @@ export default function OnlineGamePage() {
     if (prefs.buildingStyle) socket.emit("room:update-player", { buildingStyle: prefs.buildingStyle });
   }, [socket, connected, roomCode]);
 
-  // Reconnect after socket disconnect/reconnect (not on initial navigation from home page)
+  // Restore session from localStorage on mount (handles page refresh)
+  const wasSessionRestored = useRef(false);
+  useEffect(() => {
+    if (wasSessionRestored.current) return;
+    if (!roomCode || myPlayerIndex === null) {
+      const restored = mpStore.restoreSession();
+      wasSessionRestored.current = restored;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reconnect after socket disconnect/reconnect (not on initial navigation)
   const didMount = useRef(false);
   useEffect(() => {
     if (!socket || !connected || !roomCode || !reconnectToken) return;
-    // Skip on first mount — we just navigated here from home page, socket is already in the room
-    if (!didMount.current) { didMount.current = true; return; }
+    // On first mount after normal navigation, skip (socket already in room)
+    // On first mount after session restore, DO join (socket is fresh)
+    if (!didMount.current) {
+      didMount.current = true;
+      if (wasSessionRestored.current) {
+        socket.emit("room:join", { roomCode, playerName: "", reconnectToken });
+      }
+      return;
+    }
     // Socket reconnected (got a new ID) — rejoin the room
     socket.emit("room:join", { roomCode, playerName: "", reconnectToken });
   }, [socket, connected, roomCode, reconnectToken]);
@@ -561,121 +583,200 @@ export default function OnlineGamePage() {
   ].sort((a, b) => a.timestamp - b.timestamp);
 
   // --- Trade overlay for online mode ---
-  const pendingTrade = gameState.pendingTrade;
-  const iAmTradeInitiator = pendingTrade && pendingTrade.fromPlayer === myPlayerIndex;
-  const iAmTradeTarget = pendingTrade && !iAmTradeInitiator && (pendingTrade.toPlayer === null || pendingTrade.toPlayer === myPlayerIndex);
-
+  const pendingTrades = gameState.pendingTrades;
+  const tradeResponses = gameState.tradeResponses;
+  const myTrades = pendingTrades.filter((t) => t.fromPlayer === myPlayerIndex);
+  const incomingTrades = pendingTrades.filter((t) => t.fromPlayer !== myPlayerIndex && (t.toPlayer === null || t.toPlayer === myPlayerIndex));
   const myPlayer = gameState.players.find((p) => p.index === myPlayerIndex);
-  const canAffordTrade = pendingTrade && myPlayer ? Object.entries(pendingTrade.requesting).every(
-    ([r, amt]) => (amt || 0) <= myPlayer.resources[r as Resource]
-  ) : false;
 
-  const tradeOverlay = pendingTrade ? (() => {
-    if (iAmTradeTarget) {
-      // I'm being offered a trade — show accept/reject
-      const initiator = gameState.players[pendingTrade.fromPlayer];
-      const initiatorColor = PLAYER_COLOR_HEX[initiator.color];
-      return (
-        <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-4 py-3 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-pixel text-[9px] font-bold" style={{ color: initiatorColor }}>{initiator.name.toUpperCase()}</span>
-              <span className="font-pixel text-[8px] text-gray-700">OFFERS YOU A TRADE:</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1">
-                <span className="font-pixel text-[7px] text-red-700 font-bold">YOU GIVE:</span>
-                <div className="flex gap-0.5">
-                  {Object.entries(pendingTrade.requesting).flatMap(([r, amt]) =>
-                    Array.from({ length: amt! }, (_, i) => (
-                      <MiniCard key={`r-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
-                    ))
-                  )}
+  const tradeOverlay = (myTrades.length > 0 || incomingTrades.length > 0) ? (
+    <div className="flex flex-col gap-2 pointer-events-auto max-w-[calc(100vw-1rem)]">
+      {/* Incoming trades (I'm a target) */}
+      {incomingTrades.map((trade) => {
+        const initiator = gameState.players[trade.fromPlayer];
+        const initiatorColor = PLAYER_COLOR_HEX[initiator.color];
+        const canAfford = myPlayer ? Object.entries(trade.requesting).every(
+          ([r, amt]) => (amt || 0) <= myPlayer.resources[r as Resource]
+        ) : false;
+        const iAlreadyAccepted = trade.acceptedBy?.includes(myPlayerIndex);
+        return (
+          <div key={trade.id} className="bg-[#f0e6d0] border-2 border-[#8b7355] px-4 py-3" style={{ backdropFilter: "blur(4px)" }}>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-pixel text-[9px] font-bold" style={{ color: initiatorColor }}>{initiator.name.toUpperCase()}</span>
+                <span className="font-pixel text-[8px] text-gray-700">OFFERS YOU A TRADE:</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="font-pixel text-[7px] text-red-700 font-bold">YOU GIVE:</span>
+                  <div className="flex gap-0.5">
+                    {Object.entries(trade.requesting).flatMap(([r, amt]) =>
+                      Array.from({ length: amt! }, (_, i) => (
+                        <MiniCard key={`r-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
+                      ))
+                    )}
+                  </div>
+                </div>
+                <span className="font-pixel text-[10px] text-gray-400">&rarr;</span>
+                <div className="flex items-center gap-1">
+                  <span className="font-pixel text-[7px] text-green-700 font-bold">YOU GET:</span>
+                  <div className="flex gap-0.5">
+                    {Object.entries(trade.offering).flatMap(([r, amt]) =>
+                      Array.from({ length: amt! }, (_, i) => (
+                        <MiniCard key={`o-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
-              <span className="font-pixel text-[10px] text-gray-400">&rarr;</span>
-              <div className="flex items-center gap-1">
-                <span className="font-pixel text-[7px] text-green-700 font-bold">YOU GET:</span>
-                <div className="flex gap-0.5">
-                  {Object.entries(pendingTrade.offering).flatMap(([r, amt]) =>
-                    Array.from({ length: amt! }, (_, i) => (
-                      <MiniCard key={`o-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
-                    ))
-                  )}
-                </div>
+              <div className="flex gap-2 justify-center">
+                {iAlreadyAccepted ? (
+                  <>
+                    <span className="font-pixel text-[8px] text-green-700 animate-pulse">ACCEPTED — WAITING FOR CONFIRM...</span>
+                    <button
+                      onClick={() => handleAction({ type: "reject-trade", playerIndex: myPlayerIndex, tradeId: trade.id })}
+                      className="px-3 py-1.5 bg-gray-600 text-white font-pixel text-[7px] border-2 border-black hover:bg-gray-500"
+                    >
+                      WITHDRAW
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={canAfford ? () => handleAction({ type: "accept-trade", playerIndex: myPlayerIndex, tradeId: trade.id }) : undefined}
+                      disabled={!canAfford}
+                      className={`px-4 py-1.5 font-pixel text-[8px] border-2 border-black ${
+                        canAfford ? "bg-green-600 text-white hover:bg-green-500" : "bg-gray-500 text-gray-300 cursor-not-allowed"
+                      }`}
+                      title={canAfford ? "Accept this trade" : "You don't have the required resources"}
+                    >
+                      ACCEPT
+                    </button>
+                    <button
+                      onClick={() => handleAction({ type: "reject-trade", playerIndex: myPlayerIndex, tradeId: trade.id })}
+                      className="px-4 py-1.5 bg-red-600 text-white font-pixel text-[8px] border-2 border-black hover:bg-red-500"
+                    >
+                      REJECT
+                    </button>
+                  </>
+                )}
               </div>
-            </div>
-            <div className="flex gap-2 justify-center">
-              <button
-                onClick={canAffordTrade ? () => handleAction({ type: "accept-trade", playerIndex: myPlayerIndex, tradeId: pendingTrade.id }) : undefined}
-                disabled={!canAffordTrade}
-                className={`px-4 py-1.5 font-pixel text-[8px] border-2 border-black ${
-                  canAffordTrade
-                    ? "bg-green-600 text-white hover:bg-green-500"
-                    : "bg-gray-500 text-gray-300 cursor-not-allowed"
-                }`}
-                title={canAffordTrade ? "Accept this trade" : "You don't have the required resources"}
-              >
-                ACCEPT
-              </button>
-              <button
-                onClick={() => handleAction({ type: "reject-trade", playerIndex: myPlayerIndex, tradeId: pendingTrade.id })}
-                className="px-4 py-1.5 bg-red-600 text-white font-pixel text-[8px] border-2 border-black hover:bg-red-500"
-              >
-                REJECT
-              </button>
             </div>
           </div>
-        </div>
-      );
-    }
+        );
+      })}
 
-    if (iAmTradeInitiator) {
-      // I initiated the trade — show waiting + cancel
-      return (
-        <div className="bg-[#f0e6d0] border-2 border-[#8b7355] px-4 py-3 pointer-events-auto max-w-[calc(100vw-1rem)]" style={{ backdropFilter: "blur(4px)" }}>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-pixel text-[8px] text-gray-700 animate-pulse">WAITING FOR RESPONSES...</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1">
-                <span className="font-pixel text-[7px] text-green-700 font-bold">GIVE:</span>
-                <div className="flex gap-0.5">
-                  {Object.entries(pendingTrade.offering).flatMap(([r, amt]) =>
-                    Array.from({ length: amt! }, (_, i) => (
-                      <MiniCard key={`o-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
-                    ))
-                  )}
+      {/* My outgoing trades */}
+      {myTrades.map((trade) => {
+        const responses = tradeResponses?.[trade.id] ? Object.values(tradeResponses[trade.id]) : [];
+        const allResolved = responses.length > 0 && responses.every((r) => r.status !== "pending");
+        const hasCounters = responses.some((r) => r.counterOffer != null);
+        const engineAcceptors = trade.acceptedBy || [];
+        const noDeals = allResolved && engineAcceptors.length === 0 && !hasCounters;
+
+        return (
+          <div key={trade.id} className="bg-[#f0e6d0] border-2 border-[#8b7355] px-3 py-2" style={{ backdropFilter: "blur(4px)" }}>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="font-pixel text-[7px] text-gray-500">OFFERING:</span>
+                  <div className="flex gap-0.5">
+                    {Object.entries(trade.offering).flatMap(([r, amt]) =>
+                      Array.from({ length: amt! }, (_, i) => (
+                        <MiniCard key={`mo-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
+                      ))
+                    )}
+                  </div>
+                  <span className="font-pixel text-[7px] text-gray-400">FOR</span>
+                  <div className="flex gap-0.5">
+                    {Object.entries(trade.requesting).flatMap(([r, amt]) =>
+                      Array.from({ length: amt! }, (_, i) => (
+                        <MiniCard key={`mr-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
+                      ))
+                    )}
+                  </div>
                 </div>
+                <span className="font-pixel text-[8px] text-gray-700">
+                  {!allResolved ? "WAITING..." : noDeals ? "" : ""}
+                </span>
+                {noDeals && (
+                  <span className="font-pixel text-[8px] text-red-600 font-bold animate-pulse">NO DEALS</span>
+                )}
+                <button
+                  onClick={() => handleAction({ type: "cancel-trade", playerIndex: myPlayerIndex, tradeId: trade.id })}
+                  className="px-2 py-1 bg-gray-600 text-white font-pixel text-[7px] border-2 border-black hover:bg-gray-500 ml-auto shrink-0"
+                >
+                  CANCEL
+                </button>
               </div>
-              <span className="font-pixel text-[10px] text-gray-400">&rarr;</span>
-              <div className="flex items-center gap-1">
-                <span className="font-pixel text-[7px] text-red-700 font-bold">WANT:</span>
-                <div className="flex gap-0.5">
-                  {Object.entries(pendingTrade.requesting).flatMap(([r, amt]) =>
-                    Array.from({ length: amt! }, (_, i) => (
-                      <MiniCard key={`r-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
-                    ))
-                  )}
-                </div>
+              <div className="flex flex-wrap gap-1.5">
+                {responses.map((resp) => {
+                  const p = gameState.players[resp.playerIndex];
+                  if (!p) return null;
+                  const color = PLAYER_COLOR_HEX[p.color];
+                  const isAcceptor = engineAcceptors.includes(resp.playerIndex);
+                  const counter = resp.counterOffer;
+
+                  return (
+                    <div key={resp.playerIndex} className="flex flex-wrap items-center gap-1 px-2 py-1 bg-[#e8d8b8] border border-[#8b7355]">
+                      <span className="font-pixel text-[8px] font-bold" style={{ color }}>{p.name.toUpperCase()}</span>
+                      {resp.status === "pending" && <span className="text-[7px] text-gray-400 animate-pulse">...</span>}
+                      {resp.status === "rejected" && !counter && <span className="font-pixel text-[8px] text-red-600">&#10007;</span>}
+                      {resp.status === "rejected" && counter && (() => {
+                        const canAffordCounter = myPlayer ? Object.entries(counter.requesting).every(
+                          ([r, amt]) => (amt || 0) <= myPlayer.resources[r as Resource]
+                        ) : false;
+                        return (
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="font-pixel text-[6px] text-red-700">GIVE:</span>
+                            <div className="flex gap-0.5">
+                              {Object.entries(counter.requesting).flatMap(([r, amt]) =>
+                                Array.from({ length: amt! }, (_, i) => (
+                                  <MiniCard key={`cr-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="red" />
+                                ))
+                              )}
+                            </div>
+                            <span className="text-[8px] text-gray-400">&rarr;</span>
+                            <span className="font-pixel text-[6px] text-green-700">GET:</span>
+                            <div className="flex gap-0.5">
+                              {Object.entries(counter.offering).flatMap(([r, amt]) =>
+                                Array.from({ length: amt! }, (_, i) => (
+                                  <MiniCard key={`co-${r}-${i}`} resource={r as Resource} onClick={() => {}} glow="green" />
+                                ))
+                              )}
+                            </div>
+                            <button
+                              onClick={canAffordCounter ? () => handleAction({ type: "accept-counter-offer", playerIndex: myPlayerIndex, fromPlayer: resp.playerIndex } as any) : undefined}
+                              disabled={!canAffordCounter}
+                              className={`px-1.5 py-0.5 font-pixel text-[6px] border border-black ${
+                                canAffordCounter ? "bg-amber-500 text-black hover:bg-amber-400" : "bg-gray-500 text-gray-300 cursor-not-allowed"
+                              }`}
+                              title={canAffordCounter ? "Accept counter-offer" : "You don't have the required resources"}
+                            >ACCEPT</button>
+                          </div>
+                        );
+                      })()}
+                      {isAcceptor && (
+                        <div className="flex gap-1 items-center">
+                          <button
+                            onClick={() => handleAction({ type: "confirm-trade", playerIndex: myPlayerIndex, tradeId: trade.id, withPlayer: resp.playerIndex })}
+                            className="px-1.5 py-0.5 font-pixel text-[6px] border border-black bg-green-600 text-white hover:bg-green-500"
+                            title="Confirm trade"
+                          >
+                            &#10003; CONFIRM
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-            <div className="flex justify-center">
-              <button
-                onClick={() => handleAction({ type: "cancel-trade", playerIndex: myPlayerIndex, tradeId: pendingTrade.id })}
-                className="px-4 py-1.5 bg-gray-600 text-white font-pixel text-[8px] border-2 border-black hover:bg-gray-500"
-              >
-                CANCEL TRADE
-              </button>
             </div>
           </div>
-        </div>
-      );
-    }
-
-    return null;
-  })() : null;
+        );
+      })}
+    </div>
+  ) : null;
 
   return (
     <>
@@ -697,7 +798,7 @@ export default function OnlineGamePage() {
         error={localError || error}
         connected={connected}
         tradeOverlay={tradeOverlay}
-        showTradeOverlay={!!pendingTrade && (!!iAmTradeTarget || !!iAmTradeInitiator)}
+        showTradeOverlay={myTrades.length > 0 || incomingTrades.length > 0}
         announcement={announcement}
         onDismissAnnouncement={() => setAnnouncement(null)}
         onDiceAnimationStart={playDiceRoll}

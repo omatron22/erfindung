@@ -135,6 +135,18 @@ export function pickStealTarget(state: GameState, playerIndex: number, context?:
   const vertices = hexVertices(hexCoord);
   const candidates: { player: number; score: number }[] = [];
 
+  // Determine what resources the bot needs for its build goal
+  const neededResources = new Set<Resource>();
+  if (context?.buildGoal) {
+    for (const [res, amount] of Object.entries(context.buildGoal.missingResources)) {
+      if ((amount || 0) > 0) neededResources.add(res as Resource);
+    }
+  }
+
+  // Figure out what resource the robber hex produces (for need-based evaluation)
+  const robberHex = state.board.hexes[state.board.robberHex];
+  const robberHexResource = robberHex ? TERRAIN_RESOURCE[robberHex.terrain] : null;
+
   for (const vk of vertices) {
     const building = state.board.vertices[vk];
     if (!building || building.playerIndex === playerIndex) continue;
@@ -149,9 +161,32 @@ export function pickStealTarget(state: GameState, playerIndex: number, context?:
     let score: number;
     if (context) {
       const threat = context.playerThreats.find((t) => t.playerIndex === building.playerIndex);
-      score = (threat?.threatScore ?? target.victoryPoints) * 3 + resourceCount;
+      const threatScore = threat?.threatScore ?? target.victoryPoints;
+      const botVP = context.ownVP;
+      const vpDiff = target.victoryPoints - botVP;
 
-      // Endgame or aggressive: heavily prioritize the leader
+      // Base: threat still matters but is balanced with card count
+      score = threatScore * 2 + resourceCount * 2;
+
+      // Penalize stealing from players with very few cards (low chance of getting
+      // something useful). Exception: if they sit on a hex producing what we need.
+      if (resourceCount === 1) {
+        const targetMightHaveNeeded = robberHexResource && neededResources.has(robberHexResource);
+        if (!targetMightHaveNeeded) {
+          score -= 8; // heavy penalty — likely wasted steal
+        } else {
+          score -= 2; // mild penalty — worth the gamble
+        }
+      } else if (resourceCount === 2) {
+        score -= 2; // slight penalty for low card count
+      }
+
+      // When VP scores are close (within 1 VP), prefer targets with more cards
+      if (Math.abs(vpDiff) <= 1) {
+        score += resourceCount * 1.5;
+      }
+
+      // Endgame: always prioritize the leader regardless of card count
       if (context.isEndgame || context.weights.robberAggression >= 1.5) {
         if (threat && threat === context.playerThreats[0]) {
           score += 20;
@@ -166,6 +201,18 @@ export function pickStealTarget(state: GameState, playerIndex: number, context?:
 
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => b.score - a.score);
+
+  // Add randomness when top candidates are within 10% of each other
+  if (candidates.length >= 2) {
+    const topScore = candidates[0].score;
+    const threshold = Math.abs(topScore) * 0.1;
+    const closeCandidates = candidates.filter((c) => topScore - c.score <= threshold);
+    if (closeCandidates.length > 1) {
+      const pick = Math.floor(Math.random() * closeCandidates.length);
+      return closeCandidates[pick].player;
+    }
+  }
+
   return candidates[0].player;
 }
 

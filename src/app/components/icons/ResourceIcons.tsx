@@ -53,9 +53,9 @@ const RESOURCE_LABELS: Record<Resource, string> = {
   wool: "WOL",
 };
 
-const CARD_W = 40;
-const CARD_H = 56;
-const STACK_OFFSET = 6;
+const CARD_W = 36;
+const CARD_H = 50;
+const STACK_OFFSET = 4;
 
 function SingleCard({ resource, bg }: { resource: Resource; bg: string }) {
   return (
@@ -70,7 +70,7 @@ function SingleCard({ resource, bg }: { resource: Resource; bg: string }) {
       }}
     >
       <div className="mb-0.5">
-        <ResourcePixel resource={resource} size={20} />
+        <ResourcePixel resource={resource} size={18} />
       </div>
       <span className="font-pixel" style={{ fontSize: 6, color: "white", textShadow: "1px 1px 0 rgba(0,0,0,0.6)" }}>
         {RESOURCE_LABELS[resource]}

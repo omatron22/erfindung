@@ -423,135 +423,150 @@ export function generateBotCounterOffer(
   state: GameState,
   botIndex: number
 ): { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> } | null {
-  const trade = state.pendingTrade;
+  const trade = state.pendingTrades.find((t) => t.fromPlayer !== botIndex && (t.toPlayer === null || t.toPlayer === botIndex));
   if (!trade) return null;
+
+  // Check counter-offer memory: return cached result if same trade was already countered this turn
+  const coTradeHash = getTradeHash(trade.offering, trade.requesting);
+  const coMemKey = `${botIndex}-${coTradeHash}`;
+  const coMem = counterOfferMemory.get(coMemKey);
+  if (coMem && coMem.turn === state.turnNumber) {
+    return coMem.result;
+  }
 
   // Suppress counters that are identical to the original trade (= just accepting)
   function isIdenticalToOriginal(counter: { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> }): boolean {
     return resourceMapsEqual(counter.offering, trade!.requesting) && resourceMapsEqual(counter.requesting, trade!.offering);
   }
 
-  let counterChance = 0.3;
-  try {
-    const context = computeStrategicContext(state, botIndex);
-    counterChance = context.weights.counterOfferChance;
+  // Generate the counter-offer (may involve randomness), then cache it
+  function generate(): { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> } | null {
+    let counterChance = 0.3;
+    try {
+      const context = computeStrategicContext(state, botIndex);
+      counterChance = context.weights.counterOfferChance;
 
-    // VP gate: don't counter-offer to someone about to win
-    const fromVP = state.players[trade.fromPlayer].victoryPoints;
-    if (fromVP >= context.vpToWin - 1) return null;
+      // VP gate: don't counter-offer to someone about to win
+      const fromVP = state.players[trade!.fromPlayer].victoryPoints;
+      if (fromVP >= context.vpToWin - 1) return null;
 
-    if (Math.random() > counterChance) return null;
+      if (Math.random() > counterChance) return null;
 
-    const bot = state.players[botIndex];
+      const bot = state.players[botIndex];
 
-    // Build a scored list of what the bot can offer and what it wants
-    const canOffer: { res: Resource; surplus: number }[] = [];
-    const wants: { res: Resource; urgency: number }[] = [];
+      // Build a scored list of what the bot can offer and what it wants
+      const canOffer: { res: Resource; surplus: number }[] = [];
+      const wants: { res: Resource; urgency: number }[] = [];
 
-    for (const r of ALL_RESOURCES) {
-      const have = bot.resources[r];
-      const goalNeed = context.buildGoal?.missingResources[r] ?? 0;
-      const spareAfterGoal = have - goalNeed;
-
-      if (spareAfterGoal >= 2) {
-        canOffer.push({ res: r, surplus: spareAfterGoal });
-      } else if (spareAfterGoal >= 1 && have >= 3) {
-        // Have 3+ total but goal needs some — can still spare 1
-        canOffer.push({ res: r, surplus: 1 });
-      }
-
-      if (goalNeed > 0 && have < goalNeed) {
-        wants.push({ res: r, urgency: goalNeed - have });
-      }
-    }
-
-    // Fallback wants: resources with 0 count
-    if (wants.length === 0) {
       for (const r of ALL_RESOURCES) {
-        if (bot.resources[r] === 0) wants.push({ res: r, urgency: 1 });
-      }
-    }
+        const have = bot.resources[r];
+        const goalNeed = context.buildGoal?.missingResources[r] ?? 0;
+        const spareAfterGoal = have - goalNeed;
 
-    if (canOffer.length === 0 || wants.length === 0) return null;
+        if (spareAfterGoal >= 2) {
+          canOffer.push({ res: r, surplus: spareAfterGoal });
+        } else if (spareAfterGoal >= 1 && have >= 3) {
+          // Have 3+ total but goal needs some — can still spare 1
+          canOffer.push({ res: r, surplus: 1 });
+        }
 
-    // Strategy 1 (60%): Consider what the proposer originally wanted and try to accommodate
-    // This makes counter-offers feel more like a negotiation rather than ignoring the original trade
-    if (Math.random() < 0.6) {
-      // What did the proposer want? (trade.requesting = what proposer wants from us)
-      const proposerWants = ALL_RESOURCES.filter((r) => (trade.requesting[r] ?? 0) > 0);
-      // What was the proposer offering? (trade.offering = what proposer gives us)
-      const proposerOffering = ALL_RESOURCES.filter((r) => (trade.offering[r] ?? 0) > 0);
-
-      // Can we give them something they wanted?
-      const canGiveProposerWants = canOffer.filter((c) => proposerWants.includes(c.res));
-      // Do we want something they were offering?
-      const wantFromProposer = wants.filter((w) => proposerOffering.includes(w.res));
-
-      if (canGiveProposerWants.length > 0 && wantFromProposer.length > 0) {
-        // Counter with adjusted quantities — give them what they want but ask for what we need
-        const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
-        const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
-
-        // Offer more when we have big surplus
-        let giveAmount = 1;
-        if (give.surplus >= 4) giveAmount = 2;
-
-        const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
-        if (!isIdenticalToOriginal(counter)) return counter;
+        if (goalNeed > 0 && have < goalNeed) {
+          wants.push({ res: r, urgency: goalNeed - have });
+        }
       }
 
-      // Can we give them something they wanted, but ask for something different?
-      if (canGiveProposerWants.length > 0 && wants.length > 0) {
-        const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
-        const want = wants[Math.floor(Math.random() * wants.length)];
-        if (give.res !== want.res) {
+      // Fallback wants: resources with 0 count
+      if (wants.length === 0) {
+        for (const r of ALL_RESOURCES) {
+          if (bot.resources[r] === 0) wants.push({ res: r, urgency: 1 });
+        }
+      }
+
+      if (canOffer.length === 0 || wants.length === 0) return null;
+
+      // Strategy 1 (60%): Consider what the proposer originally wanted and try to accommodate
+      // This makes counter-offers feel more like a negotiation rather than ignoring the original trade
+      if (Math.random() < 0.6) {
+        // What did the proposer want? (trade.requesting = what proposer wants from us)
+        const proposerWants = ALL_RESOURCES.filter((r) => (trade!.requesting[r] ?? 0) > 0);
+        // What was the proposer offering? (trade.offering = what proposer gives us)
+        const proposerOffering = ALL_RESOURCES.filter((r) => (trade!.offering[r] ?? 0) > 0);
+
+        // Can we give them something they wanted?
+        const canGiveProposerWants = canOffer.filter((c) => proposerWants.includes(c.res));
+        // Do we want something they were offering?
+        const wantFromProposer = wants.filter((w) => proposerOffering.includes(w.res));
+
+        if (canGiveProposerWants.length > 0 && wantFromProposer.length > 0) {
+          // Counter with adjusted quantities — give them what they want but ask for what we need
+          const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
+          const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
+
+          // Offer more when we have big surplus
           let giveAmount = 1;
           if (give.surplus >= 4) giveAmount = 2;
+
           const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
           if (!isIdenticalToOriginal(counter)) return counter;
         }
+
+        // Can we give them something they wanted, but ask for something different?
+        if (canGiveProposerWants.length > 0 && wants.length > 0) {
+          const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
+          const want = wants[Math.floor(Math.random() * wants.length)];
+          if (give.res !== want.res) {
+            let giveAmount = 1;
+            if (give.surplus >= 4) giveAmount = 2;
+            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            if (!isIdenticalToOriginal(counter)) return counter;
+          }
+        }
       }
+
+      // Strategy 2 (40% or fallback): Offer surplus for needs, independent of original trade
+      // Sort by highest surplus to give most attractive offer
+      canOffer.sort((a, b) => b.surplus - a.surplus);
+      // Sort wants by urgency
+      wants.sort((a, b) => b.urgency - a.urgency);
+
+      // Pick from top candidates with some randomness
+      const giveIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * canOffer.length);
+      const wantIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * wants.length);
+      const give = canOffer[giveIdx];
+      const want = wants[wantIdx];
+
+      if (give.res === want.res) return null;
+
+      // Offer more when surplus is large
+      let giveAmount = 1;
+      if (give.surplus >= 5) giveAmount = 3;
+      else if (give.surplus >= 3) giveAmount = 2;
+
+      const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+      if (isIdenticalToOriginal(counter)) return null;
+      return counter;
+    } catch {
+      // Fallback: basic counter — bot offers surplus, requests scarce
+      if (Math.random() > counterChance) return null;
+
+      const bot = state.players[botIndex];
+      const surplus = ALL_RESOURCES.filter((r) => bot.resources[r] > 1);
+      const scarce = ALL_RESOURCES.filter((r) => bot.resources[r] === 0);
+
+      if (surplus.length === 0 || scarce.length === 0) return null;
+
+      const giveRes = surplus[Math.floor(Math.random() * surplus.length)];
+      const wantRes = scarce[Math.floor(Math.random() * scarce.length)];
+      if (giveRes === wantRes) return null;
+      const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
+      if (isIdenticalToOriginal(counter)) return null;
+      return counter;
     }
-
-    // Strategy 2 (40% or fallback): Offer surplus for needs, independent of original trade
-    // Sort by highest surplus to give most attractive offer
-    canOffer.sort((a, b) => b.surplus - a.surplus);
-    // Sort wants by urgency
-    wants.sort((a, b) => b.urgency - a.urgency);
-
-    // Pick from top candidates with some randomness
-    const giveIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * canOffer.length);
-    const wantIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * wants.length);
-    const give = canOffer[giveIdx];
-    const want = wants[wantIdx];
-
-    if (give.res === want.res) return null;
-
-    // Offer more when surplus is large
-    let giveAmount = 1;
-    if (give.surplus >= 5) giveAmount = 3;
-    else if (give.surplus >= 3) giveAmount = 2;
-
-    const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
-    if (isIdenticalToOriginal(counter)) return null;
-    return counter;
-  } catch {
-    // Fallback: basic counter — bot offers surplus, requests scarce
-    if (Math.random() > counterChance) return null;
-
-    const bot = state.players[botIndex];
-    const surplus = ALL_RESOURCES.filter((r) => bot.resources[r] > 1);
-    const scarce = ALL_RESOURCES.filter((r) => bot.resources[r] === 0);
-
-    if (surplus.length === 0 || scarce.length === 0) return null;
-
-    const giveRes = surplus[Math.floor(Math.random() * surplus.length)];
-    const wantRes = scarce[Math.floor(Math.random() * scarce.length)];
-    if (giveRes === wantRes) return null;
-    const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
-    if (isIdenticalToOriginal(counter)) return null;
-    return counter;
   }
+
+  const result = generate();
+  counterOfferMemory.set(coMemKey, { turn: state.turnNumber, result });
+  return result;
 }
 
 // Trade memory — bots remember their decision on identical trades for several turns
@@ -559,6 +574,12 @@ const tradeMemory = new Map<string, { tradeHash: string; turn: number; decision:
 
 // Per-bot trade proposal memory — prevents bots from proposing the same trade repeatedly
 const proposedTradeMemory = new Map<number, { hash: string; turn: number }>();
+
+// Counter-offer memory — bots give the same counter-offer for the same trade within a turn
+const counterOfferMemory = new Map<string, {
+  turn: number;
+  result: { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> } | null;
+}>();
 
 function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: Partial<Record<Resource, number>>): string {
   const o = ALL_RESOURCES.map((r) => offering[r] ?? 0).join(",");
@@ -576,7 +597,7 @@ function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: P
  * - Personality (trader bots accept more freely)
  */
 export function decideBotTradeResponse(state: GameState, botIndex: number): "accept" | "reject" {
-  const trade = state.pendingTrade;
+  const trade = state.pendingTrades.find((t) => t.fromPlayer !== botIndex && (t.toPlayer === null || t.toPlayer === botIndex));
   if (!trade) return "reject";
   if (trade.fromPlayer === botIndex) return "reject";
   if (trade.toPlayer !== null && trade.toPlayer !== botIndex) return "reject";

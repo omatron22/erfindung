@@ -94,7 +94,8 @@ function runBotGame(initialState: GameState, maxTurns = 1500): {
     if (action.type === "offer-trade") {
       tradeCount++;
       const offerResult = applyAction(state, action);
-      if (offerResult.valid && offerResult.newState && offerResult.newState.pendingTrade) {
+      if (offerResult.valid && offerResult.newState && offerResult.newState.pendingTrades.length > 0) {
+        const trade = offerResult.newState.pendingTrades[offerResult.newState.pendingTrades.length - 1];
         // Auto: first other bot tries to accept
         let accepted = false;
         for (let i = 0; i < state.players.length; i++) {
@@ -102,19 +103,27 @@ function runBotGame(initialState: GameState, maxTurns = 1500): {
           const acceptResult = applyAction(offerResult.newState, {
             type: "accept-trade",
             playerIndex: i,
-            tradeId: offerResult.newState.pendingTrade.id,
+            tradeId: trade.id,
           });
           if (acceptResult.valid && acceptResult.newState) {
-            state = acceptResult.newState;
-            accepted = true;
-            break;
+            const confirmResult = applyAction(acceptResult.newState, {
+              type: "confirm-trade",
+              playerIndex: botIndex,
+              tradeId: trade.id,
+              withPlayer: i,
+            });
+            if (confirmResult.valid && confirmResult.newState) {
+              state = confirmResult.newState;
+              accepted = true;
+              break;
+            }
           }
         }
         if (!accepted) {
           const cancelResult = applyAction(offerResult.newState, {
             type: "cancel-trade",
             playerIndex: botIndex,
-            tradeId: offerResult.newState.pendingTrade.id,
+            tradeId: trade.id,
           });
           state = cancelResult.valid && cancelResult.newState ? cancelResult.newState : offerResult.newState;
         }

@@ -13,7 +13,7 @@ import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { playClick, playNavigate, playError as playErrorSound, startMusic } from "@/app/utils/sounds";
 import SettingsDropdown from "@/app/components/ui/SettingsDropdown";
 import CloudLayer from "@/app/components/ui/CloudLayer";
-import { loadPreferences } from "@/app/utils/preferences";
+import { loadPreferences, loadGameModePrefs, saveGameModePrefs } from "@/app/utils/preferences";
 
 const ALL_COLORS = PLAYER_COLORS;
 const MAX_PLAYERS = 8;
@@ -125,6 +125,33 @@ export default function Home() {
 
   const [expansionBoard, setExpansionBoard] = useState(false);
   const vpToWin = customVp;
+
+  // Load saved game mode preferences on mount
+  useEffect(() => {
+    const modePrefs = loadGameModePrefs();
+    if (!modePrefs) return;
+    if (modePrefs.fairDice !== undefined) setFairDice(modePrefs.fairDice);
+    if (modePrefs.friendlyRobber !== undefined) setFriendlyRobber(modePrefs.friendlyRobber);
+    if (modePrefs.doublesRollAgain !== undefined) setDoublesRollAgain(modePrefs.doublesRollAgain);
+    if (modePrefs.sheepNuke !== undefined) setSheepNuke(modePrefs.sheepNuke);
+    if (modePrefs.turnTimer !== undefined) setTurnTimer(modePrefs.turnTimer as TurnTimer);
+    if (modePrefs.vpToWin !== undefined) setCustomVp(modePrefs.vpToWin);
+    if (modePrefs.expansionBoard !== undefined) setExpansionBoard(modePrefs.expansionBoard);
+  }, []);
+
+  // Save game mode preferences whenever they change
+  useEffect(() => {
+    saveGameModePrefs({
+      fairDice,
+      friendlyRobber,
+      doublesRollAgain,
+      sheepNuke,
+      turnTimer,
+      vpToWin: customVp,
+      expansionBoard,
+      gameMode: "classic",
+    });
+  }, [fairDice, friendlyRobber, doublesRollAgain, sheepNuke, turnTimer, customVp, expansionBoard]);
 
   // Close color picker on outside click
   useEffect(() => {
