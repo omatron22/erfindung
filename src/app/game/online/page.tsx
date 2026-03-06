@@ -10,13 +10,14 @@ import VictoryOverlay from "@/app/components/ui/VictoryOverlay";
 import {
   playDiceRoll, playBuild, playTrade, playTurnNotification,
   playRobber, playSteal, playEndTurn, playDevCard, playError,
-  playChat, playWin, playCollect, playAchievement, playExplosion,
+  playChat, playSetup, playWin, playCollect, playClick, playAchievement, playExplosion,
   startMusic, stopMusic,
 } from "@/app/utils/sounds";
+import NukeSequenceOverlay from "@/app/components/ui/NukeSequenceOverlay";
 import type { Announcement } from "@/app/components/ui/AnnouncementOverlay";
 import { MiniCard } from "@/app/components/game/helpers";
 import type { GameAction } from "@/shared/types/actions";
-import type { Resource, GameLogEntry } from "@/shared/types/game";
+import type { Resource, GameLogEntry, DiceRoll } from "@/shared/types/game";
 import { PLAYER_COLORS } from "@/shared/types/game";
 import type { ClientGameState, LobbyPlayer, LobbyConfig } from "@/shared/types/messages";
 import type { BuildingStyle } from "@/shared/types/config";
@@ -55,6 +56,8 @@ export default function OnlineGamePage() {
   const [screenShake, setScreenShake] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const [nukeSequence, setNukeSequence] = useState<{ diceResult: DiceRoll; playerName: string; playerColor: string; isFreeNuke: boolean } | null>(null);
+  const pendingNukeEffects = useRef<{ events: import("@/shared/types/actions").GameEvent[] } | null>(null);
 
   // Keep music playing during online lobby, stop when game starts
   useEffect(() => {
@@ -223,7 +226,12 @@ export default function OnlineGamePage() {
     for (const event of lastEvents) {
       switch (event.type) {
         case "dice-rolled": playDiceRoll(); break;
-        case "settlement-built": case "city-built": case "road-built": playBuild(); break;
+        case "settlement-built": case "city-built": case "road-built": {
+          // Use setup sound during setup phases, build sound during main game
+          const isSetup = gameState.phase === "setup-forward" || gameState.phase === "setup-reverse";
+          if (isSetup) playSetup(); else playBuild();
+          break;
+        }
         case "trade-completed": playTrade(); break;
         case "robber-moved": playRobber(); break;
         case "resource-stolen": playSteal(); break;
@@ -249,61 +257,75 @@ export default function OnlineGamePage() {
         }
         case "resources-distributed": playCollect(); break;
         case "sheep-nuke-destroyed": {
-          const number = event.data?.number;
-          if (number && gameState) {
-            const nuked = new Set<HexKey>();
-            for (const [key, hex] of Object.entries(gameState.board.hexes)) {
-              if (hex.number === number) nuked.add(key);
+          // Stash nuke destruction effects — they'll play after the cinematic sequence completes
+          // (or immediately if no cinematic is running)
+          const nukeDestroyedEvent = event;
+          const applyNukeEffects = () => {
+            const gs = useMultiplayerStore.getState().gameState;
+            if (!gs) return;
+            const number = nukeDestroyedEvent.data?.number;
+            if (number) {
+              const nuked = new Set<HexKey>();
+              for (const [key, hex] of Object.entries(gs.board.hexes)) {
+                if (hex.number === number) nuked.add(key);
+              }
+              if (nuked.size > 0) {
+                setNukeFlashHexes(nuked);
+                setTimeout(() => setNukeFlashHexes(new Set()), 1600);
+              }
             }
-            if (nuked.size > 0) {
-              setNukeFlashHexes(nuked);
-              setTimeout(() => setNukeFlashHexes(new Set()), 1600);
+            const destroyedVertexKeys = (nukeDestroyedEvent.data?.destroyedVertexKeys as VertexKey[] | undefined) ?? [];
+            const destroyedEdgeKeys = (nukeDestroyedEvent.data?.destroyedEdgeKeys as EdgeKey[] | undefined) ?? [];
+            const explosions: NukeExplosion[] = [];
+            const HEX_SIZE = 50;
+            for (const vk of destroyedVertexKeys) {
+              const pos = vertexToPixel(vk, HEX_SIZE);
+              explosions.push({ x: pos.x, y: pos.y, id: `v-${vk}` });
             }
-          }
-          // Compute explosion positions from destroyed piece keys
-          const destroyedVertexKeys = (event.data?.destroyedVertexKeys as VertexKey[] | undefined) ?? [];
-          const destroyedEdgeKeys = (event.data?.destroyedEdgeKeys as EdgeKey[] | undefined) ?? [];
-          const explosions: NukeExplosion[] = [];
-          const HEX_SIZE = 50;
-          for (const vk of destroyedVertexKeys) {
-            const pos = vertexToPixel(vk, HEX_SIZE);
-            explosions.push({ x: pos.x, y: pos.y, id: `v-${vk}` });
-          }
-          for (const ek of destroyedEdgeKeys) {
-            const [v1, v2] = edgeEndpoints(ek);
-            const p1 = vertexToPixel(v1, HEX_SIZE);
-            const p2 = vertexToPixel(v2, HEX_SIZE);
-            explosions.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, id: `e-${ek}` });
-          }
-          if (explosions.length > 0) {
-            setNukeExplosions(explosions);
-            setTimeout(() => setNukeExplosions([]), 1200);
-          }
-          playExplosion();
-          setScreenShake(true);
-          setTimeout(() => setScreenShake(false), 500);
-          // Show nuke announcement with destruction summary
-          if (event.playerIndex !== null) {
-            const p = gameState.players[event.playerIndex];
-            const buildings = Number(event.data?.buildingsDestroyed ?? 0);
-            const roads = Number(event.data?.roadsDestroyed ?? 0);
-            const totalDestroyed = buildings + roads;
-            let detail = "";
-            if (totalDestroyed === 0) {
-              detail = "Nothing was destroyed!";
-            } else {
-              const parts: string[] = [];
-              if (buildings > 0) parts.push(`${buildings} building${buildings > 1 ? "s" : ""}`);
-              if (roads > 0) parts.push(`${roads} road${roads > 1 ? "s" : ""}`);
-              const comments = totalDestroyed <= 2
-                ? ["took a hit", "felt that one", "needs a moment"]
-                : totalDestroyed <= 4
-                ? ["got rekt", "is in shambles"]
-                : ["is absolutely cooked", "needs to call 911"];
-              const comment = comments[totalDestroyed % comments.length];
-              detail = `${parts.join(" and ")} destroyed!\n${p.name} ${comment}`;
+            for (const ek of destroyedEdgeKeys) {
+              const [v1, v2] = edgeEndpoints(ek);
+              const p1 = vertexToPixel(v1, HEX_SIZE);
+              const p2 = vertexToPixel(v2, HEX_SIZE);
+              explosions.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, id: `e-${ek}` });
             }
-            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-destroyed", detail, extra: String(number ?? "") });
+            if (explosions.length > 0) {
+              setNukeExplosions(explosions);
+              setTimeout(() => setNukeExplosions([]), 1200);
+            }
+            playExplosion();
+            setScreenShake(true);
+            setTimeout(() => setScreenShake(false), 500);
+            if (nukeDestroyedEvent.playerIndex !== null) {
+              const p = gs.players[nukeDestroyedEvent.playerIndex];
+              const buildings = Number(nukeDestroyedEvent.data?.buildingsDestroyed ?? 0);
+              const roads = Number(nukeDestroyedEvent.data?.roadsDestroyed ?? 0);
+              const totalDestroyed = buildings + roads;
+              let detail = "";
+              if (totalDestroyed === 0) {
+                detail = "Nothing was destroyed!";
+              } else {
+                const parts: string[] = [];
+                if (buildings > 0) parts.push(`${buildings} building${buildings > 1 ? "s" : ""}`);
+                if (roads > 0) parts.push(`${roads} road${roads > 1 ? "s" : ""}`);
+                const comments = totalDestroyed <= 2
+                  ? ["took a hit", "felt that one", "needs a moment"]
+                  : totalDestroyed <= 4
+                  ? ["got rekt", "is in shambles"]
+                  : ["is absolutely cooked", "needs to call 911"];
+                const comment = comments[totalDestroyed % comments.length];
+                detail = `${parts.join(" and ")} destroyed!\n${p.name} ${comment}`;
+              }
+              setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-destroyed", detail, extra: String(number ?? "") });
+            }
+          };
+          // If cinematic is about to play (sheep-nuke-rolled came in same batch), defer effects
+          const hasNukeRolled = lastEvents.some(e => e.type === "sheep-nuke-rolled");
+          if (hasNukeRolled) {
+            pendingNukeEffects.current = { events: [nukeDestroyedEvent] };
+            // Store the apply function on the ref for the sequence complete handler
+            (pendingNukeEffects.current as any).apply = applyNukeEffects;
+          } else {
+            applyNukeEffects();
           }
           break;
         }
@@ -327,10 +349,18 @@ export default function OnlineGamePage() {
           break;
         }
         case "sheep-nuke-rolled": {
-          if (event.playerIndex !== null) {
+          if (event.playerIndex !== null && event.data) {
             const p = gameState.players[event.playerIndex];
-            const total = event.data?.total ?? "";
-            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-rolled", extra: String(total) });
+            const die1 = Number(event.data.die1 ?? 1);
+            const die2 = Number(event.data.die2 ?? 1);
+            const total = Number(event.data.total ?? die1 + die2);
+            const isFree = !!gameState.freeNukeAvailable;
+            setNukeSequence({
+              diceResult: { die1, die2, total },
+              playerName: p.name,
+              playerColor: PLAYER_COLOR_HEX[p.color],
+              isFreeNuke: isFree,
+            });
           }
           break;
         }
@@ -344,6 +374,16 @@ export default function OnlineGamePage() {
       }
     }
   }, [lastEvents]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Nuke sequence complete handler ---
+  const handleNukeSequenceComplete = useCallback(() => {
+    setNukeSequence(null);
+    // Apply any deferred nuke destruction effects
+    if (pendingNukeEffects.current && (pendingNukeEffects.current as any).apply) {
+      (pendingNukeEffects.current as any).apply();
+      pendingNukeEffects.current = null;
+    }
+  }, []);
 
   // --- Action dispatch ---
   const handleAction = useCallback((action: GameAction) => {
@@ -656,9 +696,15 @@ export default function OnlineGamePage() {
     );
   }
 
-  // Build playerColors
+  // Build playerColors and buildingStyles
   const playerColors: Record<number, string> = {};
+  const boardBuildingStyles: Record<number, BuildingStyle> = {};
   for (const p of gameState.players) playerColors[p.index] = PLAYER_COLOR_HEX[p.color] ?? "#fff";
+  if (lobbyPlayers) {
+    for (const lp of lobbyPlayers) {
+      if (lp.buildingStyle) boardBuildingStyles[lp.index] = lp.buildingStyle as BuildingStyle;
+    }
+  }
 
   // Chat log — merge game log + multiplayer chat
   const chatLog: GameLogEntry[] = [
@@ -873,7 +919,7 @@ export default function OnlineGamePage() {
         myPlayerIndex={myPlayerIndex}
         onAction={handleAction}
         playerColors={playerColors}
-        buildingStyles={{}}
+        buildingStyles={boardBuildingStyles}
         chatLog={chatLog}
         onSendChat={handleSendChat}
         onMainMenu={handleLeaveGame}
@@ -892,6 +938,15 @@ export default function OnlineGamePage() {
         onDismissAnnouncement={() => setAnnouncement(null)}
         onDiceAnimationStart={playDiceRoll}
       />
+      {nukeSequence && (
+        <NukeSequenceOverlay
+          diceResult={nukeSequence.diceResult}
+          playerName={nukeSequence.playerName}
+          playerColor={nukeSequence.playerColor}
+          onSequenceComplete={handleNukeSequenceComplete}
+          isFreeNuke={nukeSequence.isFreeNuke}
+        />
+      )}
       {gameState.phase === "finished" && (
         <VictoryOverlay
           gameState={gameState}
