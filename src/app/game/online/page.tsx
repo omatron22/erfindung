@@ -22,7 +22,9 @@ import type { ClientGameState, LobbyPlayer, LobbyConfig } from "@/shared/types/m
 import type { BuildingStyle } from "@/shared/types/config";
 import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS } from "@/shared/types/config";
 import { STYLE_DEFS } from "@/shared/buildingStyles";
-import type { HexKey } from "@/shared/types/coordinates";
+import type { HexKey, VertexKey, EdgeKey } from "@/shared/types/coordinates";
+import type { NukeExplosion } from "@/app/components/board/HexBoard";
+import { vertexToPixel, edgeEndpoints } from "@/shared/utils/hexMath";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import CloudLayer from "@/app/components/ui/CloudLayer";
 import { loadPreferences } from "@/app/utils/preferences";
@@ -49,6 +51,7 @@ export default function OnlineGamePage() {
   const [flashSeven, setFlashSeven] = useState(false);
   const [flashingHexes, setFlashingHexes] = useState<Set<HexKey>>(new Set());
   const [nukeFlashHexes, setNukeFlashHexes] = useState<Set<HexKey>>(new Set());
+  const [nukeExplosions, setNukeExplosions] = useState<NukeExplosion[]>([]);
   const [screenShake, setScreenShake] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
@@ -225,8 +228,25 @@ export default function OnlineGamePage() {
         case "robber-moved": playRobber(); break;
         case "resource-stolen": playSteal(); break;
         case "turn-ended": playEndTurn(); break;
-        case "development-card-bought": case "knight-played": case "road-building-played":
-        case "year-of-plenty-played": case "monopoly-played": playDevCard(); break;
+        case "development-card-bought": case "road-building-played":
+        case "year-of-plenty-played": playDevCard(); break;
+        case "knight-played": {
+          playDevCard();
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "knight" });
+          }
+          break;
+        }
+        case "monopoly-played": {
+          playDevCard();
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            const resource = String(event.data?.resource ?? "");
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "monopoly", extra: resource });
+          }
+          break;
+        }
         case "resources-distributed": playCollect(); break;
         case "sheep-nuke-destroyed": {
           const number = event.data?.number;
@@ -240,9 +260,51 @@ export default function OnlineGamePage() {
               setTimeout(() => setNukeFlashHexes(new Set()), 1600);
             }
           }
+          // Compute explosion positions from destroyed piece keys
+          const destroyedVertexKeys = (event.data?.destroyedVertexKeys as VertexKey[] | undefined) ?? [];
+          const destroyedEdgeKeys = (event.data?.destroyedEdgeKeys as EdgeKey[] | undefined) ?? [];
+          const explosions: NukeExplosion[] = [];
+          const HEX_SIZE = 50;
+          for (const vk of destroyedVertexKeys) {
+            const pos = vertexToPixel(vk, HEX_SIZE);
+            explosions.push({ x: pos.x, y: pos.y, id: `v-${vk}` });
+          }
+          for (const ek of destroyedEdgeKeys) {
+            const [v1, v2] = edgeEndpoints(ek);
+            const p1 = vertexToPixel(v1, HEX_SIZE);
+            const p2 = vertexToPixel(v2, HEX_SIZE);
+            explosions.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, id: `e-${ek}` });
+          }
+          if (explosions.length > 0) {
+            setNukeExplosions(explosions);
+            setTimeout(() => setNukeExplosions([]), 1200);
+          }
           playExplosion();
           setScreenShake(true);
           setTimeout(() => setScreenShake(false), 500);
+          // Show nuke announcement with destruction summary
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            const buildings = Number(event.data?.buildingsDestroyed ?? 0);
+            const roads = Number(event.data?.roadsDestroyed ?? 0);
+            const totalDestroyed = buildings + roads;
+            let detail = "";
+            if (totalDestroyed === 0) {
+              detail = "Nothing was destroyed!";
+            } else {
+              const parts: string[] = [];
+              if (buildings > 0) parts.push(`${buildings} building${buildings > 1 ? "s" : ""}`);
+              if (roads > 0) parts.push(`${roads} road${roads > 1 ? "s" : ""}`);
+              const comments = totalDestroyed <= 2
+                ? ["took a hit", "felt that one", "needs a moment"]
+                : totalDestroyed <= 4
+                ? ["got rekt", "is in shambles"]
+                : ["is absolutely cooked", "needs to call 911"];
+              const comment = comments[totalDestroyed % comments.length];
+              detail = `${parts.join(" and ")} destroyed!\n${p.name} ${comment}`;
+            }
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-destroyed", detail, extra: String(number ?? "") });
+          }
           break;
         }
         case "largest-army-changed": case "longest-road-changed": {
@@ -254,6 +316,28 @@ export default function OnlineGamePage() {
               type: event.type === "largest-army-changed" ? "largest-army" : "longest-road",
             });
             playAchievement();
+          }
+          break;
+        }
+        case "doubles-roll-again": {
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "doubles" });
+          }
+          break;
+        }
+        case "sheep-nuke-rolled": {
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            const total = event.data?.total ?? "";
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-rolled", extra: String(total) });
+          }
+          break;
+        }
+        case "sheep-nuke-doubles": {
+          if (event.playerIndex !== null) {
+            const p = gameState.players[event.playerIndex];
+            setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-doubles" });
           }
           break;
         }
@@ -438,8 +522,8 @@ export default function OnlineGamePage() {
                           {BUILDING_STYLES.map((s) => (
                             <button key={s} className={`flex flex-col items-center gap-0.5 px-1 py-1 border-2 transition-all ${((player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE) === s ? "border-amber-500 bg-amber-50 scale-105" : "border-gray-300 hover:border-gray-600 cursor-pointer hover:scale-105"}`} onClick={() => handlePickStyle(s)}>
                               <div className="flex gap-0.5">
-                                <StylePreview style={s} type="settlement" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
-                                <StylePreview style={s} type="city" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
+                                <StylePreview style={s} type="settlement" color="#888" />
+                                <StylePreview style={s} type="city" color="#888" />
                               </div>
                               <span className="font-pixel text-[5px] text-gray-700">{STYLE_DEFS[s].name.toUpperCase()}</span>
                             </button>
@@ -718,7 +802,11 @@ export default function OnlineGamePage() {
                   const counter = resp.counterOffer;
 
                   return (
-                    <div key={resp.playerIndex} className="flex flex-wrap items-center gap-1 px-2 py-1 bg-[#e8d8b8] border border-[#8b7355]">
+                    <div key={resp.playerIndex} className={`flex flex-wrap items-center gap-1 px-2 py-1 border ${
+                      isAcceptor ? "bg-green-100 border-green-500" :
+                      resp.status === "rejected" ? "bg-red-100 border-red-400" :
+                      "bg-[#e8d8b8] border-[#8b7355]"
+                    }`}>
                       <span className="font-pixel text-[8px] font-bold" style={{ color }}>{p.name.toUpperCase()}</span>
                       {resp.status === "pending" && <span className="text-[7px] text-gray-400 animate-pulse">...</span>}
                       {resp.status === "rejected" && !counter && <span className="font-pixel text-[8px] text-red-600">&#10007;</span>}
@@ -793,6 +881,7 @@ export default function OnlineGamePage() {
         flashingHexes={flashingHexes}
         flashSeven={flashSeven}
         nukeFlashHexes={nukeFlashHexes}
+        nukeExplosions={nukeExplosions}
         screenShake={screenShake}
         turnDeadline={gameState.turnDeadline}
         error={localError || error}

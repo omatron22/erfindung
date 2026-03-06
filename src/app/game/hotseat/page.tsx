@@ -18,7 +18,9 @@ import NukeSequenceOverlay from "@/app/components/ui/NukeSequenceOverlay";
 import type { Announcement } from "@/app/components/ui/AnnouncementOverlay";
 import type { GameAction, GameEvent } from "@/shared/types/actions";
 import type { GameState, GameLogEntry, Resource, DiceRoll } from "@/shared/types/game";
-import type { HexKey } from "@/shared/types/coordinates";
+import type { HexKey, VertexKey, EdgeKey } from "@/shared/types/coordinates";
+import type { NukeExplosion } from "@/app/components/board/HexBoard";
+import { vertexToPixel, edgeEndpoints } from "@/shared/utils/hexMath";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import { applyAction } from "@/server/engine/gameEngine";
 import { decideBotAction, decideBotTradeResponse, generateBotCounterOffer } from "@/server/bots/botController";
@@ -73,6 +75,7 @@ export default function GamePage() {
   const [flashSeven, setFlashSeven] = useState(false);
   const [flashingHexes, setFlashingHexes] = useState<Set<HexKey>>(new Set());
   const [nukeFlashHexes, setNukeFlashHexes] = useState<Set<HexKey>>(new Set());
+  const [nukeExplosions, setNukeExplosions] = useState<NukeExplosion[]>([]);
   const [screenShake, setScreenShake] = useState(false);
   const [pendingTradeUI, setPendingTradeUI] = useState<PendingTradeUI | null>(null);
   const [botTradeUI, setBotTradeUI] = useState<BotTradeUI | null>(null);
@@ -206,6 +209,56 @@ export default function GamePage() {
         playAchievement();
         return;
       }
+      if (event.type === "doubles-roll-again" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "doubles" });
+        return;
+      }
+      if (event.type === "sheep-nuke-rolled" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        const total = event.data?.total ?? "";
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-rolled", extra: String(total) });
+        return;
+      }
+      if (event.type === "sheep-nuke-destroyed" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        const buildings = Number(event.data?.buildingsDestroyed ?? 0);
+        const roads = Number(event.data?.roadsDestroyed ?? 0);
+        const totalDestroyed = buildings + roads;
+        let detail = "";
+        if (totalDestroyed === 0) {
+          detail = "Nothing was destroyed!";
+        } else {
+          const parts: string[] = [];
+          if (buildings > 0) parts.push(`${buildings} building${buildings > 1 ? "s" : ""}`);
+          if (roads > 0) parts.push(`${roads} road${roads > 1 ? "s" : ""}`);
+          const comments = totalDestroyed <= 2
+            ? ["took a hit", "felt that one", "needs a moment"]
+            : totalDestroyed <= 4
+            ? ["got rekt", "is in shambles"]
+            : ["is absolutely cooked", "needs to call 911"];
+          const comment = comments[totalDestroyed % comments.length];
+          detail = `${parts.join(" and ")} destroyed!\n${p.name} ${comment}`;
+        }
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-destroyed", detail, extra: String(event.data?.number ?? "") });
+        return;
+      }
+      if (event.type === "sheep-nuke-doubles" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "sheep-nuke-doubles" });
+        return;
+      }
+      if (event.type === "knight-played" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "knight" });
+        return;
+      }
+      if (event.type === "monopoly-played" && event.playerIndex !== null) {
+        const p = state.players[event.playerIndex];
+        const resource = String(event.data?.resource ?? "");
+        setAnnouncement({ playerName: p.name, playerColor: PLAYER_COLOR_HEX[p.color], type: "monopoly", extra: resource });
+        return;
+      }
     }
   }
 
@@ -223,6 +276,26 @@ export default function GamePage() {
     if (nukedHexes.size > 0) {
       setNukeFlashHexes(nukedHexes);
       setTimeout(() => setNukeFlashHexes(new Set()), 1600);
+    }
+
+    // Compute explosion positions from destroyed piece keys
+    const destroyedVertexKeys = (nukeEvent.data?.destroyedVertexKeys as VertexKey[] | undefined) ?? [];
+    const destroyedEdgeKeys = (nukeEvent.data?.destroyedEdgeKeys as EdgeKey[] | undefined) ?? [];
+    const explosions: NukeExplosion[] = [];
+    const HEX_SIZE = 50; // must match the size prop passed to HexBoard
+    for (const vk of destroyedVertexKeys) {
+      const pos = vertexToPixel(vk, HEX_SIZE);
+      explosions.push({ x: pos.x, y: pos.y, id: `v-${vk}` });
+    }
+    for (const ek of destroyedEdgeKeys) {
+      const [v1, v2] = edgeEndpoints(ek);
+      const p1 = vertexToPixel(v1, HEX_SIZE);
+      const p2 = vertexToPixel(v2, HEX_SIZE);
+      explosions.push({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2, id: `e-${ek}` });
+    }
+    if (explosions.length > 0) {
+      setNukeExplosions(explosions);
+      setTimeout(() => setNukeExplosions([]), 1200);
     }
 
     // Screen shake + explosion sound
@@ -1049,6 +1122,7 @@ export default function GamePage() {
         flashingHexes={flashingHexes}
         flashSeven={flashSeven}
         nukeFlashHexes={nukeFlashHexes}
+        nukeExplosions={nukeExplosions}
         screenShake={screenShake}
         turnDeadline={turnDeadline}
         error={error}

@@ -590,8 +590,8 @@ export default function Home() {
                             onClick={() => pickStyle(idx, s)}
                           >
                             <div className="flex gap-0.5">
-                              <StylePreview style={s} type="settlement" color={PLAYER_COLOR_HEX[player.color]} />
-                              <StylePreview style={s} type="city" color={PLAYER_COLOR_HEX[player.color]} />
+                              <StylePreview style={s} type="settlement" color="#888" />
+                              <StylePreview style={s} type="city" color="#888" />
                             </div>
                             <span className="font-pixel text-[5px] text-gray-700">{STYLE_DEFS[s].name.toUpperCase()}</span>
                           </button>

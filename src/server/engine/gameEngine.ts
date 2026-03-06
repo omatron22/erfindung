@@ -1377,7 +1377,13 @@ function destroyStructuresOnNumber(state: GameState, number: number, instigatorI
   events.push({
     type: "sheep-nuke-destroyed",
     playerIndex: instigatorIndex,
-    data: { number, buildingsDestroyed: destroyedVertices.size, roadsDestroyed: destroyedEdges.size },
+    data: {
+      number,
+      buildingsDestroyed: destroyedVertices.size,
+      roadsDestroyed: destroyedEdges.size,
+      destroyedVertexKeys: Array.from(destroyedVertices),
+      destroyedEdgeKeys: Array.from(destroyedEdges),
+    },
   });
 
   if (totalDestroyed === 0) {

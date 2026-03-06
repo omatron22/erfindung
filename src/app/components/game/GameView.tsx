@@ -22,6 +22,7 @@ import type { GameState, GameLogEntry, Resource, DevelopmentCardType } from "@/s
 import type { ClientGameState } from "@/shared/types/messages";
 import type { BuildingStyle } from "@/shared/types/config";
 import type { VertexKey, EdgeKey, HexKey } from "@/shared/types/coordinates";
+import type { NukeExplosion } from "@/app/components/board/HexBoard";
 import {
   ALL_RESOURCES, RESOURCE_COLORS, PLAYER_COLOR_HEX, BUILDING_COSTS,
   MAX_ROADS, MAX_SETTLEMENTS, MAX_CITIES,
@@ -56,6 +57,7 @@ export interface GameViewProps {
   flashingHexes: Set<HexKey>;
   flashSeven: boolean;
   nukeFlashHexes?: Set<HexKey>;
+  nukeExplosions?: NukeExplosion[];
   screenShake?: boolean;
   turnDeadline?: number | null;
 
@@ -104,6 +106,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     flashingHexes,
     flashSeven,
     nukeFlashHexes,
+    nukeExplosions,
     screenShake,
     turnDeadline,
     error,
@@ -433,7 +436,12 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     });
   }
 
-  // Phase text
+  // Phase text — use turnNumber to deterministically pick variants (no Math.random flickering)
+  const turnSeed = gameState.turnNumber ?? 0;
+  function pickVariant(variants: string[]) {
+    return variants[turnSeed % variants.length];
+  }
+
   let phaseText = "";
   if (gameState.phase === "setup-forward" || gameState.phase === "setup-reverse") {
     if (isMyTurn) {
@@ -444,17 +452,25 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
     }
   } else if (isMyTurn) {
     switch (gameState.turnPhase) {
-      case "roll": phaseText = "ROLL THE DICE"; break;
+      case "roll": phaseText = pickVariant(["ROLL THE DICE", "YOUR MOVE — ROLL!", "TIME TO ROLL!", "LET 'EM FLY!", "DICE ARE WAITING..."]); break;
       case "discard": phaseText = "WAITING FOR DISCARDS..."; break;
-      case "robber-place": phaseText = "MOVE THE ROBBER"; break;
-      case "robber-steal": phaseText = "CHOOSE STEAL TARGET"; break;
-      case "trade-or-build": phaseText = "TRADE OR BUILD"; break;
+      case "robber-place": phaseText = pickVariant(["UNLEASH THE ROBBER!", "MOVE THE ROBBER", "DEPLOY THE BANDIT!", "WHERE SHALL CHAOS REIGN?"]); break;
+      case "robber-steal": phaseText = pickVariant(["CHOOSE YOUR VICTIM", "PICK A POCKET", "ROB 'EM BLIND"]); break;
+      case "trade-or-build": phaseText = pickVariant(["BUILD YOUR EMPIRE", "TRADE & BUILD", "MAKE YOUR MOVE", "WHAT'S THE PLAN?", "SHOW 'EM WHAT YOU GOT"]); break;
       case "road-building-1": phaseText = "PLACE ROAD 1/2"; break;
       case "road-building-2": phaseText = "PLACE ROAD 2/2"; break;
-      case "sheep-nuke-pick": phaseText = "CHOOSE NUMBER TO DESTROY"; break;
+      case "sheep-nuke-pick": phaseText = pickVariant(["CHOOSE NUMBER TO DESTROY", "PICK YOUR TARGET!", "RAIN FIRE!"]); break;
     }
   } else {
-    phaseText = `${currentPlayer.name.toUpperCase()} THINKING...`;
+    const name = currentPlayer.name.toUpperCase();
+    switch (gameState.turnPhase) {
+      case "roll": phaseText = pickVariant([`${name} IS ROLLING...`, `${name} GRABS THE DICE...`]); break;
+      case "trade-or-build": phaseText = pickVariant([`${name} IS PLOTTING...`, `${name} IS SCHEMING...`, `${name} IS BUILDING...`]); break;
+      case "robber-place": phaseText = pickVariant([`${name} MOVES THE ROBBER...`, `${name} UNLEASHES CHAOS...`]); break;
+      case "robber-steal": phaseText = pickVariant([`${name} IS STEALING...`, `${name} PICKS A POCKET...`]); break;
+      case "discard": phaseText = "WAITING FOR DISCARDS..."; break;
+      default: phaseText = pickVariant([`${name} THINKING...`, `${name} IS UP...`]); break;
+    }
   }
 
   const myResources = Object.entries(myPlayer.resources) as [Resource, number][];
@@ -489,6 +505,7 @@ const GameView = forwardRef<GameViewHandle, GameViewProps>(function GameView(pro
             flashingHexes={flashingHexes}
             flashSeven={flashSeven}
             nukeFlashHexes={nukeFlashHexes}
+            nukeExplosions={nukeExplosions}
             playerColors={playerColors}
             buildingStyles={buildingStyles}
             pendingPlacement={pendingPlacement}

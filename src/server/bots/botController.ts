@@ -489,7 +489,9 @@ export function generateBotCounterOffer(
     return resourceMapsEqual(counter.offering, trade!.requesting) && resourceMapsEqual(counter.requesting, trade!.offering);
   }
 
-  // Generate the counter-offer (may involve randomness), then cache it
+  // Generate the counter-offer (may involve randomness), then cache it.
+  // Counter-offers MUST relate to the original trade — they should be modifications
+  // of the original deal (adjusted quantities, swapped resources), not random trades.
   function generate(): { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> } | null {
     let counterChance = 0.3;
     try {
@@ -503,6 +505,12 @@ export function generateBotCounterOffer(
       if (Math.random() > counterChance) return null;
 
       const bot = state.players[botIndex];
+      const proposer = state.players[trade!.fromPlayer];
+
+      // What the proposer originally asked for (what they want from us)
+      const proposerWants = ALL_RESOURCES.filter((r) => (trade!.requesting[r] ?? 0) > 0);
+      // What the proposer originally offered (what they'd give us)
+      const proposerOffering = ALL_RESOURCES.filter((r) => (trade!.offering[r] ?? 0) > 0);
 
       // Build a scored list of what the bot can offer and what it wants
       const canOffer: { res: Resource; surplus: number }[] = [];
@@ -516,7 +524,6 @@ export function generateBotCounterOffer(
         if (spareAfterGoal >= 2) {
           canOffer.push({ res: r, surplus: spareAfterGoal });
         } else if (spareAfterGoal >= 1 && have >= 3) {
-          // Have 3+ total but goal needs some — can still spare 1
           canOffer.push({ res: r, surplus: 1 });
         }
 
@@ -534,36 +541,56 @@ export function generateBotCounterOffer(
 
       if (canOffer.length === 0 || wants.length === 0) return null;
 
-      // Strategy 1 (60%): Consider what the proposer originally wanted and try to accommodate
-      // This makes counter-offers feel more like a negotiation rather than ignoring the original trade
-      if (Math.random() < 0.6) {
-        // What did the proposer want? (trade.requesting = what proposer wants from us)
-        const proposerWants = ALL_RESOURCES.filter((r) => (trade!.requesting[r] ?? 0) > 0);
-        // What was the proposer offering? (trade.offering = what proposer gives us)
-        const proposerOffering = ALL_RESOURCES.filter((r) => (trade!.offering[r] ?? 0) > 0);
+      // Filter wants to only request resources the proposer likely has.
+      // The proposer offered these resources, so they probably have them.
+      // Also include resources they have 2+ of (visible in hand count).
+      const proposerLikelyHas = new Set<Resource>(proposerOffering);
+      for (const r of ALL_RESOURCES) {
+        if (proposer.resources[r] >= 2) proposerLikelyHas.add(r);
+      }
 
-        // Can we give them something they wanted?
-        const canGiveProposerWants = canOffer.filter((c) => proposerWants.includes(c.res));
-        // Do we want something they were offering?
-        const wantFromProposer = wants.filter((w) => proposerOffering.includes(w.res));
+      // --- Strategy 1: Adjust quantities on the original trade ---
+      // The bot gives what the proposer wants, and asks for what the proposer offered,
+      // but adjusts the amounts to be more favorable to the bot.
+      const canGiveProposerWants = canOffer.filter((c) => proposerWants.includes(c.res));
+      const wantFromProposer = wants.filter((w) => proposerOffering.includes(w.res));
 
-        if (canGiveProposerWants.length > 0 && wantFromProposer.length > 0) {
-          // Counter with adjusted quantities — give them what they want but ask for what we need
-          const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
-          const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
+      if (canGiveProposerWants.length > 0 && wantFromProposer.length > 0) {
+        const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
+        const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
 
-          // Offer more when we have big surplus
-          let giveAmount = 1;
-          if (give.surplus >= 4) giveAmount = 2;
+        // Ask for more or offer less than the original
+        const origGiveAmt = trade!.requesting[give.res] ?? 1;
+        const origWantAmt = trade!.offering[want.res] ?? 1;
 
-          const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
-          if (!isIdenticalToOriginal(counter)) return counter;
+        // Reduce what we give (but at least 1), or increase what we ask for
+        let giveAmount = Math.max(1, origGiveAmt - 1);
+        let wantAmount = origWantAmt;
+        // If we have large surplus, match original give amount (be generous)
+        if (give.surplus >= 4) giveAmount = origGiveAmt;
+        // Sometimes ask for a bit more
+        if (Math.random() < 0.3 && proposer.resources[want.res] >= origWantAmt + 1) {
+          wantAmount = origWantAmt + 1;
         }
 
-        // Can we give them something they wanted, but ask for something different?
-        if (canGiveProposerWants.length > 0 && wants.length > 0) {
+        const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: wantAmount } };
+        if (!isIdenticalToOriginal(counter)) return counter;
+        // If identical, fall through to try other strategies
+      }
+
+      // --- Strategy 2: Give what they want, but ask for a different resource ---
+      // Swap what we're requesting for something else we need, but still give
+      // something the proposer wanted.
+      if (canGiveProposerWants.length > 0) {
+        // Filter wants to resources the proposer likely has
+        const feasibleWants = wants.filter((w) => proposerLikelyHas.has(w.res));
+        // Prefer resources from the original trade, then feasible alternatives
+        const alternativeWants = feasibleWants.filter((w) => !proposerOffering.includes(w.res));
+        const wantPool = alternativeWants.length > 0 ? alternativeWants : feasibleWants;
+
+        if (wantPool.length > 0) {
           const give = canGiveProposerWants[Math.floor(Math.random() * canGiveProposerWants.length)];
-          const want = wants[Math.floor(Math.random() * wants.length)];
+          const want = wantPool[Math.floor(Math.random() * wantPool.length)];
           if (give.res !== want.res) {
             let giveAmount = 1;
             if (give.surplus >= 4) giveAmount = 2;
@@ -573,44 +600,74 @@ export function generateBotCounterOffer(
         }
       }
 
-      // Strategy 2 (40% or fallback): Offer surplus for needs, independent of original trade
-      // Sort by highest surplus to give most attractive offer
-      canOffer.sort((a, b) => b.surplus - a.surplus);
-      // Sort wants by urgency
-      wants.sort((a, b) => b.urgency - a.urgency);
+      // --- Strategy 3: Offer a different resource, but give them something related ---
+      // We can't give exactly what they want, so offer a substitute resource,
+      // but still ask for something from the original trade.
+      if (wantFromProposer.length > 0) {
+        // Find resources we can offer that are "related" — same category or at least
+        // something the proposer might want (they don't have much of it)
+        const alternativeOffers = canOffer.filter(
+          (c) => !proposerWants.includes(c.res) && proposer.resources[c.res] <= 1
+        );
+        if (alternativeOffers.length > 0) {
+          // Sort by surplus descending to offer the most attractive deal
+          alternativeOffers.sort((a, b) => b.surplus - a.surplus);
+          const give = alternativeOffers[0];
+          const want = wantFromProposer[Math.floor(Math.random() * wantFromProposer.length)];
+          if (give.res !== want.res) {
+            let giveAmount = 1;
+            if (give.surplus >= 4) giveAmount = 2;
+            if (give.surplus >= 6) giveAmount = 3;
+            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            if (!isIdenticalToOriginal(counter)) return counter;
+          }
+        }
+      }
 
-      // Pick from top candidates with some randomness
-      const giveIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * canOffer.length);
-      const wantIdx = Math.random() < 0.7 ? 0 : Math.floor(Math.random() * wants.length);
-      const give = canOffer[giveIdx];
-      const want = wants[wantIdx];
+      // --- Strategy 4 (last resort): Offer surplus for a resource the proposer was offering ---
+      // Still anchored to the original trade — we ask for something they offered,
+      // and give something we have surplus of.
+      if (proposerOffering.length > 0) {
+        const relevantWants = wants.filter((w) => proposerOffering.includes(w.res));
+        const relevantOffers = canOffer.filter((c) => !proposerOffering.includes(c.res));
+        if (relevantWants.length > 0 && relevantOffers.length > 0) {
+          relevantOffers.sort((a, b) => b.surplus - a.surplus);
+          const give = relevantOffers[0];
+          const want = relevantWants[Math.floor(Math.random() * relevantWants.length)];
+          if (give.res !== want.res) {
+            let giveAmount = 1;
+            if (give.surplus >= 4) giveAmount = 2;
+            const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
+            if (!isIdenticalToOriginal(counter)) return counter;
+          }
+        }
+      }
 
-      if (give.res === want.res) return null;
-
-      // Offer more when surplus is large
-      let giveAmount = 1;
-      if (give.surplus >= 5) giveAmount = 3;
-      else if (give.surplus >= 3) giveAmount = 2;
-
-      const counter = { offering: { [give.res]: giveAmount }, requesting: { [want.res]: 1 } };
-      if (isIdenticalToOriginal(counter)) return null;
-      return counter;
+      // No viable counter-offer that relates to the original trade — give up
+      return null;
     } catch {
-      // Fallback: basic counter — bot offers surplus, requests scarce
+      // Fallback: try to make a counter related to the original trade
       if (Math.random() > counterChance) return null;
 
       const bot = state.players[botIndex];
-      const surplus = ALL_RESOURCES.filter((r) => bot.resources[r] > 1);
-      const scarce = ALL_RESOURCES.filter((r) => bot.resources[r] === 0);
+      const proposerOffering = ALL_RESOURCES.filter((r) => (trade!.offering[r] ?? 0) > 0);
+      const proposerWants = ALL_RESOURCES.filter((r) => (trade!.requesting[r] ?? 0) > 0);
 
-      if (surplus.length === 0 || scarce.length === 0) return null;
+      // Offer something the proposer wanted (that we have surplus of)
+      const surplusOfWanted = proposerWants.filter((r) => bot.resources[r] > 1);
+      // Request something the proposer was offering (that we're short on)
+      const wantFromOffered = proposerOffering.filter((r) => bot.resources[r] <= 1);
 
-      const giveRes = surplus[Math.floor(Math.random() * surplus.length)];
-      const wantRes = scarce[Math.floor(Math.random() * scarce.length)];
-      if (giveRes === wantRes) return null;
-      const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
-      if (isIdenticalToOriginal(counter)) return null;
-      return counter;
+      if (surplusOfWanted.length > 0 && wantFromOffered.length > 0) {
+        const giveRes = surplusOfWanted[Math.floor(Math.random() * surplusOfWanted.length)];
+        const wantRes = wantFromOffered[Math.floor(Math.random() * wantFromOffered.length)];
+        if (giveRes !== wantRes) {
+          const counter = { offering: { [giveRes]: 1 }, requesting: { [wantRes]: 1 } };
+          if (!isIdenticalToOriginal(counter)) return counter;
+        }
+      }
+
+      return null;
     }
   }
 

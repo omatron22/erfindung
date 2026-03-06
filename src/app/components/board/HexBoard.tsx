@@ -17,6 +17,12 @@ export interface PendingPlacement {
   key: string; // VertexKey or EdgeKey
 }
 
+export interface NukeExplosion {
+  x: number;
+  y: number;
+  id: string;
+}
+
 interface Props {
   board: Board;
   size?: number;
@@ -26,6 +32,7 @@ interface Props {
   flashingHexes?: Set<HexKey>;
   flashSeven?: boolean;
   nukeFlashHexes?: Set<HexKey>;
+  nukeExplosions?: NukeExplosion[];
   playerColors?: Record<number, string>;
   buildingStyles?: Record<number, BuildingStyle>;
   pendingPlacement?: PendingPlacement | null;
@@ -49,6 +56,7 @@ export default function HexBoard({
   flashingHexes,
   flashSeven,
   nukeFlashHexes,
+  nukeExplosions,
   playerColors,
   buildingStyles,
   pendingPlacement,
@@ -479,6 +487,57 @@ export default function HexBoard({
               );
             }
           })()}
+
+          {/* 8-bit pixel explosion animations for nuke-destroyed pieces */}
+          {nukeExplosions && nukeExplosions.length > 0 && (
+            <>
+              <defs>
+                <style>{`
+                  @keyframes nuke-explosion-burst {
+                    0% { transform: scale(0.3); opacity: 1; }
+                    20% { transform: scale(1.2); opacity: 1; }
+                    40% { transform: scale(0.9); opacity: 1; }
+                    60% { transform: scale(1.1); opacity: 0.8; }
+                    80% { transform: scale(1.0); opacity: 0.4; }
+                    100% { transform: scale(1.3); opacity: 0; }
+                  }
+                  .nuke-explosion {
+                    animation: nuke-explosion-burst 1s ease-out forwards;
+                    transform-origin: center center;
+                  }
+                `}</style>
+              </defs>
+              {nukeExplosions.map((exp) => {
+                const s = size * 0.22; // pixel block size for 8-bit look
+                return (
+                  <g key={exp.id} className="nuke-explosion" style={{ transformOrigin: `${exp.x}px ${exp.y}px` }}>
+                    {/* Center core — bright yellow */}
+                    <rect x={exp.x - s} y={exp.y - s} width={s * 2} height={s * 2} fill="#FFE033" />
+                    {/* Inner ring — orange pixel blocks */}
+                    <rect x={exp.x - s} y={exp.y - s * 2} width={s * 2} height={s} fill="#FF8C00" />
+                    <rect x={exp.x - s} y={exp.y + s} width={s * 2} height={s} fill="#FF8C00" />
+                    <rect x={exp.x - s * 2} y={exp.y - s} width={s} height={s * 2} fill="#FF8C00" />
+                    <rect x={exp.x + s} y={exp.y - s} width={s} height={s * 2} fill="#FF8C00" />
+                    {/* Diagonal orange blocks */}
+                    <rect x={exp.x - s * 2} y={exp.y - s * 2} width={s} height={s} fill="#FF6600" />
+                    <rect x={exp.x + s} y={exp.y - s * 2} width={s} height={s} fill="#FF6600" />
+                    <rect x={exp.x - s * 2} y={exp.y + s} width={s} height={s} fill="#FF6600" />
+                    <rect x={exp.x + s} y={exp.y + s} width={s} height={s} fill="#FF6600" />
+                    {/* Outer tips — red pixel sparks */}
+                    <rect x={exp.x - s * 0.5} y={exp.y - s * 3} width={s} height={s} fill="#FF2200" />
+                    <rect x={exp.x - s * 0.5} y={exp.y + s * 2} width={s} height={s} fill="#FF2200" />
+                    <rect x={exp.x - s * 3} y={exp.y - s * 0.5} width={s} height={s} fill="#FF2200" />
+                    <rect x={exp.x + s * 2} y={exp.y - s * 0.5} width={s} height={s} fill="#FF2200" />
+                    {/* Outer diagonal sparks */}
+                    <rect x={exp.x - s * 2.5} y={exp.y - s * 2.5} width={s * 0.7} height={s * 0.7} fill="#FF4400" />
+                    <rect x={exp.x + s * 1.8} y={exp.y - s * 2.5} width={s * 0.7} height={s * 0.7} fill="#FF4400" />
+                    <rect x={exp.x - s * 2.5} y={exp.y + s * 1.8} width={s * 0.7} height={s * 0.7} fill="#FF4400" />
+                    <rect x={exp.x + s * 1.8} y={exp.y + s * 1.8} width={s * 0.7} height={s * 0.7} fill="#FF4400" />
+                  </g>
+                );
+              })}
+            </>
+          )}
         </svg>
       </div>
 
