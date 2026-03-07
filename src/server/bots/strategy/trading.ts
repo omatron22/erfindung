@@ -79,25 +79,43 @@ export function pickPlayerTrade(
   );
   if (!requestRes) return null;
 
-  // Determine max willingness to offer based on urgency:
-  // - How close are we to completing our build goal? (fewer missing = more urgent)
-  // - Are we racing opponents for a contested spot? (high spatialUrgency)
-  // - Is this a resource we can't produce? (missing resources = desperate)
-  // Base: willing to go 1:1. Escalate to 2:1 or 3:1 based on urgency.
+  // Determine max willingness to offer based on urgency.
+  // Think like a real player: if you need 1 resource to win and have 10 cards
+  // of something else, you'd offer all of them. But for a casual need, 1:1 is fine.
+  const totalHand = Object.values(player.resources).reduce((s, n) => s + n, 0);
+  const botVP = context.ownVP;
+  const vpToWin = context.vpToWin;
+  const vpAway = vpToWin - botVP;
+
   let maxOffer = 1;
 
-  // Close to completing build goal — willing to pay more
-  if (totalMissing <= 2) maxOffer = 2;
-  if (totalMissing === 1) maxOffer = 3;
+  // 1 VP from winning — give almost everything to close it out
+  if (vpAway <= 1 && totalMissing === 1) {
+    maxOffer = offerCount; // dump the whole surplus
+  }
+  // 2 VP away and only need 1 resource — very aggressive
+  else if (vpAway <= 2 && totalMissing === 1) {
+    maxOffer = Math.min(offerCount, Math.max(4, Math.floor(offerCount * 0.7)));
+  }
+  // Close to completing build goal
+  else if (totalMissing === 1) {
+    maxOffer = Math.min(offerCount, 4);
+  }
+  else if (totalMissing <= 2) {
+    maxOffer = Math.min(offerCount, 3);
+  }
 
-  // Racing for a contested spot — willing to pay a lot
-  if (context.spatialUrgency >= 0.6) maxOffer = Math.max(maxOffer, 2);
-  if (context.spatialUrgency >= 0.8) maxOffer = Math.max(maxOffer, 3);
+  // Racing for a contested spot — willing to pay a lot more
+  if (context.spatialUrgency >= 0.8) maxOffer = Math.max(maxOffer, Math.min(offerCount, 4));
+  else if (context.spatialUrgency >= 0.6) maxOffer = Math.max(maxOffer, Math.min(offerCount, 3));
 
-  // Resource we can't produce at all — more willing to pay
-  if (context.missingResources.includes(requestRes)) maxOffer = Math.max(maxOffer, 2);
+  // Resource we can't produce at all — more willing to overpay
+  if (context.missingResources.includes(requestRes)) maxOffer = Math.max(maxOffer, Math.min(offerCount, 3));
 
-  // Cap at what we can actually spare (keep at least 1 of the offered resource)
+  // Large hand and resource is plentiful — can afford to be generous
+  if (totalHand >= 8 && offerCount >= 4) maxOffer = Math.max(maxOffer, 3);
+
+  // Cap: always keep at least 1 card of the resource we're offering
   maxOffer = Math.min(maxOffer, offerCount - 1);
   if (maxOffer < 1) maxOffer = 1;
 
