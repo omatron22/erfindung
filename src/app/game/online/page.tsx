@@ -68,27 +68,26 @@ export default function OnlineGamePage() {
   }, [gameState]);
 
   // Lobby UI state
-  const [colorPickerOpen, setColorPickerOpen] = useState<number | null>(null);
   const [stylePickerOpen, setStylePickerOpen] = useState<number | null>(null);
   const [lobbyChatInput, setLobbyChatInput] = useState("");
   const [editingBotNameIdx, setEditingBotNameIdx] = useState<number | null>(null);
   const [editingBotName, setEditingBotName] = useState("");
   const [editingMyName, setEditingMyName] = useState(false);
   const [myNameDraft, setMyNameDraft] = useState("");
-  const colorPickerRef = useRef<HTMLDivElement>(null);
+  const stylePickerRef = useRef<HTMLDivElement>(null);
 
   const isHost = myPlayerIndex === hostIndex;
 
-  // Close color picker on outside click
+  // Close style/color picker on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) setColorPickerOpen(null);
+      if (stylePickerRef.current && !stylePickerRef.current.contains(e.target as Node)) setStylePickerOpen(null);
     }
-    if (colorPickerOpen !== null) {
+    if (stylePickerOpen !== null) {
       document.addEventListener("mousedown", handleClick);
       return () => document.removeEventListener("mousedown", handleClick);
     }
-  }, [colorPickerOpen]);
+  }, [stylePickerOpen]);
 
   // --- Socket event listeners ---
   // Use getState() in callbacks to avoid stale closures and prevent
@@ -418,8 +417,8 @@ export default function OnlineGamePage() {
   function handleRemoveBot(playerIndex: number) { socket?.emit("room:remove-bot", { playerIndex }); }
   function handleStartGameClick() { socket?.emit("room:start-game", {}); }
   function handleUpdateConfig(config: Partial<LobbyConfig>) { socket?.emit("room:update-config", { config }); }
-  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); setColorPickerOpen(null); }
-  function handleBotPickColor(playerIndex: number, color: string) { socket?.emit("room:update-bot", { playerIndex, color }); setColorPickerOpen(null); }
+  function handlePickColor(color: string) { socket?.emit("room:update-player", { color }); }
+  function handleBotPickColor(playerIndex: number, color: string) { socket?.emit("room:update-bot", { playerIndex, color }); }
   function handleSaveBotName(playerIndex: number) { socket?.emit("room:update-bot", { playerIndex, name: editingBotName }); setEditingBotNameIdx(null); }
   function handlePickStyle(style: BuildingStyle) { socket?.emit("room:update-player", { buildingStyle: style }); setStylePickerOpen(null); }
   function handleUpdateName(name: string) { socket?.emit("room:update-player", { name }); }
@@ -450,7 +449,6 @@ export default function OnlineGamePage() {
   if (!gameState) {
     const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/join/${roomCode}` : "";
     const isExpansion = lobbyConfig?.expansionBoard ?? false;
-    const usedColors = new Set(lobbyPlayers.map((p) => p.color));
     const myPlayer = lobbyPlayers.find((p) => p.index === myPlayerIndex);
     const timerIdx = lobbyConfig ? TURN_TIMER_OPTIONS.indexOf(lobbyConfig.turnTimer) : 0;
     const vpIdx = lobbyConfig ? (VP_OPTIONS as readonly number[]).indexOf(lobbyConfig.vpToWin) : 7;
@@ -496,17 +494,13 @@ export default function OnlineGamePage() {
                 const isMe = player.index === myPlayerIndex;
                 const canEditBot = isHost && player.isBot;
                 const canPickColor = isMe || canEditBot;
+                // In multiplayer, colors taken by OTHER real humans are blocked
+                const humanTakenColors = new Set(
+                  lobbyPlayers.filter((p) => !p.isBot && p.index !== player.index).map((p) => p.color)
+                );
                 return (
                   <div key={player.index} className="relative">
                     <div className="flex items-center gap-2 bg-[#e8d8b8] px-2 py-1.5 border-2 border-black">
-                      <button
-                        className={`w-6 h-6 border-2 border-black shrink-0 relative ${canPickColor ? "cursor-pointer" : "cursor-default"}`}
-                        style={{ backgroundColor: PLAYER_COLOR_HEX[player.color] ?? "#888" }}
-                        onClick={canPickColor ? () => { setColorPickerOpen(colorPickerOpen === player.index ? null : player.index); setStylePickerOpen(null); } : undefined}
-                        title={`Color: ${player.color}`}
-                      >
-                        {canPickColor && <span className="absolute inset-0 flex items-center justify-center text-[7px] font-bold" style={{ color: ["white", "yellow"].includes(player.color) ? "#333" : "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{colorPickerOpen === player.index ? "\u25B2" : "\u25BC"}</span>}
-                      </button>
                       {/* Editable name — human player or host editing bot */}
                       {isMe && editingMyName ? (
                         <input
@@ -542,11 +536,12 @@ export default function OnlineGamePage() {
                         {player.index === hostIndex && !player.isBot && <span className="text-amber-600 text-[6px] ml-1">HOST</span>}
                       </span>
                       )}
-                      {isMe && (
+                      {/* Combined style + color button */}
+                      {canPickColor && (
                         <button
                           className={`w-7 h-7 flex items-center justify-center border-2 shrink-0 ${stylePickerOpen === player.index ? "border-amber-500 bg-amber-50" : "border-gray-400 hover:border-gray-600"}`}
-                          onClick={() => { setStylePickerOpen(stylePickerOpen === player.index ? null : player.index); setColorPickerOpen(null); }}
-                          title={`Style: ${STYLE_DEFS[player.buildingStyle as BuildingStyle ?? DEFAULT_BUILDING_STYLE].name}`}
+                          onClick={() => { setStylePickerOpen(stylePickerOpen === player.index ? null : player.index); }}
+                          title="Style & Color"
                         >
                           <StylePreview style={(player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE} type="settlement" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
                         </button>
@@ -556,34 +551,56 @@ export default function OnlineGamePage() {
                       )}
                     </div>
 
-                    {/* Color picker dropdown */}
-                    {canPickColor && colorPickerOpen === player.index && (
-                      <div ref={colorPickerRef} className="bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                        <div className="flex flex-wrap gap-1">
-                          {PLAYER_COLORS.map((c) => (
-                            <button key={c} className={`relative flex items-center gap-1 px-1.5 py-0.5 border-2 transition-all ${player.color === c ? "border-gray-900 scale-105" : "border-gray-400 hover:border-gray-700 cursor-pointer hover:scale-105"}`} style={{ backgroundColor: `${PLAYER_COLOR_HEX[c]}25` }} onClick={() => canEditBot ? handleBotPickColor(player.index, c) : handlePickColor(c)}>
-                              <span className="w-3 h-3 border border-black/30 shrink-0" style={{ backgroundColor: PLAYER_COLOR_HEX[c] }} />
-                              <span className="font-pixel text-[5px] text-gray-700 uppercase">{c}</span>
-                            </button>
-                          ))}
+                    {/* Combined color + style picker dropdown */}
+                    {canPickColor && stylePickerOpen === player.index && (
+                      <div ref={stylePickerRef} className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
+                        {/* Color swatches — crossed out if taken by another human */}
+                        <div className="flex flex-wrap gap-1 mb-1.5 pb-1.5 border-b border-[#c4a96a]">
+                          {PLAYER_COLORS.map((c) => {
+                            const isCurrent = player.color === c;
+                            const takenByHuman = humanTakenColors.has(c);
+                            return (
+                              <button
+                                key={c}
+                                className={`w-5 h-5 border-2 transition-all relative ${
+                                  isCurrent
+                                    ? "border-gray-900 scale-110"
+                                    : takenByHuman
+                                      ? "border-gray-400 cursor-not-allowed"
+                                      : "border-gray-400 hover:border-gray-700 cursor-pointer hover:scale-110"
+                                }`}
+                                style={{ backgroundColor: PLAYER_COLOR_HEX[c] }}
+                                onClick={() => {
+                                  if (takenByHuman) return;
+                                  canEditBot ? handleBotPickColor(player.index, c) : handlePickColor(c);
+                                }}
+                                disabled={takenByHuman}
+                                title={c}
+                              >
+                                {takenByHuman && (
+                                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 20 20">
+                                    <line x1="2" y1="2" x2="18" y2="18" stroke="#000" strokeWidth="2.5" />
+                                    <line x1="18" y1="2" x2="2" y2="18" stroke="#000" strokeWidth="2.5" />
+                                  </svg>
+                                )}
+                              </button>
+                            );
+                          })}
                         </div>
-                      </div>
-                    )}
-
-                    {/* Style picker dropdown */}
-                    {isMe && stylePickerOpen === player.index && (
-                      <div className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                        <div className="grid grid-cols-2 gap-1">
-                          {BUILDING_STYLES.map((s) => (
-                            <button key={s} className={`flex flex-col items-center gap-0.5 px-1 py-1 border-2 transition-all ${((player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE) === s ? "border-amber-500 bg-amber-50 scale-105" : "border-gray-300 hover:border-gray-600 cursor-pointer hover:scale-105"}`} onClick={() => handlePickStyle(s)}>
-                              <div className="flex gap-0.5">
-                                <StylePreview style={s} type="settlement" color="#888" />
-                                <StylePreview style={s} type="city" color="#888" />
-                              </div>
-                              <span className="font-pixel text-[5px] text-gray-700">{STYLE_DEFS[s].name.toUpperCase()}</span>
-                            </button>
-                          ))}
-                        </div>
+                        {/* Building styles (only for own player) */}
+                        {isMe && (
+                          <div className="grid grid-cols-2 gap-1">
+                            {BUILDING_STYLES.map((s) => (
+                              <button key={s} className={`flex flex-col items-center gap-0.5 px-1 py-1 border-2 transition-all ${((player.buildingStyle as BuildingStyle) ?? DEFAULT_BUILDING_STYLE) === s ? "border-amber-500 bg-amber-50 scale-105" : "border-gray-300 hover:border-gray-600 cursor-pointer hover:scale-105"}`} onClick={() => handlePickStyle(s)}>
+                                <div className="flex gap-0.5">
+                                  <StylePreview style={s} type="settlement" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
+                                  <StylePreview style={s} type="city" color={PLAYER_COLOR_HEX[player.color] ?? "#888"} />
+                                </div>
+                                <span className="font-pixel text-[5px] text-gray-700">{STYLE_DEFS[s].name.toUpperCase()}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

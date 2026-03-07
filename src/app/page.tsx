@@ -488,24 +488,20 @@ export default function Home() {
                 {/* Combined color + style picker dropdown */}
                 {stylePickerOpen === idx && (
                   <div className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                    {/* Color swatches */}
+                    {/* Color swatches — all pickable, bots swap automatically */}
                     <div className="flex flex-wrap gap-1 mb-1.5 pb-1.5 border-b border-[#c4a96a]">
                       {ALL_COLORS.map((c) => {
                         const isCurrent = player.color === c;
-                        const taken = usedColors.has(c) && !isCurrent;
                         return (
                           <button
                             key={c}
                             className={`w-5 h-5 border-2 transition-all ${
                               isCurrent
                                 ? "border-gray-900 scale-110"
-                                : taken
-                                  ? "border-gray-300 opacity-35 cursor-not-allowed"
-                                  : "border-gray-400 hover:border-gray-700 cursor-pointer hover:scale-110"
+                                : "border-gray-400 hover:border-gray-700 cursor-pointer hover:scale-110"
                             }`}
                             style={{ backgroundColor: PLAYER_COLOR_HEX[c] }}
-                            onClick={() => !taken && pickColor(idx, c)}
-                            disabled={taken}
+                            onClick={() => pickColor(idx, c)}
                             title={c}
                           />
                         );
