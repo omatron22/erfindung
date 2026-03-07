@@ -1,6 +1,5 @@
 import type { GameState, Resource, PortType } from "@/shared/types/game";
 import type { HexKey, VertexKey, EdgeKey } from "@/shared/types/coordinates";
-import type { BotPersonality } from "@/shared/types/config";
 import {
   hexVertices,
   hexKey,
@@ -17,8 +16,22 @@ export type BotStrategy = "expansion" | "cities" | "development";
 
 export interface PlayerThreat {
   playerIndex: number;
+  /** Raw threat score for robber/trading decisions */
   threatScore: number;
+  /** Visible VP (what everyone can see) */
   visibleVP: number;
+  /**
+   * Estimated TRUE VP — accounts for hidden VP cards, pending largest army/longest road,
+   * and likely city upgrades. This is the real "who is actually winning" metric.
+   * A player at 5 visible VP with 3 dev cards and ore+grain production
+   * is more dangerous than someone at 7 VP with no cards and no production.
+   */
+  estimatedVP: number;
+  /**
+   * Momentum: how fast this player is likely to gain VP per turn.
+   * High production + city resources + dev card potential = high momentum.
+   */
+  momentum: number;
   devCardCount: number;
   roadLength: number;
   knightsPlayed: number;
@@ -26,6 +39,8 @@ export interface PlayerThreat {
   productionRates: Record<Resource, number>;
   hasCityResources: boolean;
   hasPortAccess: boolean;
+  /** How many settlements could be upgraded to cities */
+  upgradeableSettlements: number;
 }
 
 export interface BuildGoal {
@@ -78,7 +93,6 @@ export interface BotStrategicContext {
   gameProgress: number;
   vpToWin: number;
   missingResources: Resource[];
-  personality: BotPersonality;
   weights: PersonalityWeights;
   buildGoal: BuildGoal | null;
   buildGoals: BuildGoal[];
@@ -112,8 +126,7 @@ export interface BotStrategicContext {
 export function computeStrategicContext(state: GameState, playerIndex: number): BotStrategicContext {
   const player = state.players[playerIndex];
   const vpToWin = state.config?.vpToWin ?? 10;
-  const personality: BotPersonality = state.config?.players[playerIndex]?.personality ?? "balanced";
-  const weights = getWeights(personality);
+  const weights = getWeights();
 
   // --- Production rates ---
   const productionRates: Record<Resource, number> = { brick: 0, lumber: 0, ore: 0, grain: 0, wool: 0 };
@@ -174,6 +187,11 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
   }
 
   // --- Threat assessment ---
+  // Key insight: visible VP is misleading. The TRUE leader is determined by:
+  // - Hidden VP cards in hand (~20% of dev cards are VP cards)
+  // - Pending bonuses (1 knight from army = likely +2 VP soon)
+  // - Momentum (high ore+grain production = likely cities coming)
+  // - Board position (how fast can they keep scoring?)
   const playerThreats: PlayerThreat[] = [];
   for (let i = 0; i < state.players.length; i++) {
     if (i === playerIndex) continue;
@@ -181,19 +199,7 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
     const roadLen = calculateLongestRoad(state, i);
     const devCardCount = p.developmentCards.length + p.newDevelopmentCards.length;
 
-    let threatScore = p.victoryPoints + devCardCount * 0.3;
-
-    if (longestRoadHolder === null && roadLen >= MIN_ROADS_FOR_LONGEST_ROAD - 1) {
-      threatScore += 1.5;
-    } else if (longestRoadHolder !== i && roadLen >= longestRoadLength - 1) {
-      threatScore += 1.5;
-    }
-    if (armyHolder === null && p.knightsPlayed >= MIN_KNIGHTS_FOR_LARGEST_ARMY - 1) {
-      threatScore += 1.5;
-    } else if (armyHolder !== i && p.knightsPlayed >= armyHolderKnights - 1) {
-      threatScore += 1.5;
-    }
-
+    // --- Opponent production ---
     const opponentProduction: Record<Resource, number> = { brick: 0, lumber: 0, ore: 0, grain: 0, wool: 0 };
     for (const [, hex] of Object.entries(state.board.hexes)) {
       if (!hex.number || hex.hasRobber) continue;
@@ -213,24 +219,108 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
     const oppTotalProduction = Object.values(opponentProduction).reduce((s, v) => s + v, 0);
     const hasCityResources = opponentProduction.ore > 0 && opponentProduction.grain > 0;
     const hasPortAccess = p.portsAccess.length > 0;
+    const upgradeableSettlements = p.settlements.length; // each could become a city
 
-    const productionBonus = Math.max(0, (oppTotalProduction - 0.8) * 1.5);
-    threatScore += productionBonus;
+    // === ESTIMATED VP ===
+    // Start with visible VP
+    let estimatedVP = p.victoryPoints;
 
+    // Hidden VP cards: ~5/25 = 20% of dev deck is VP cards.
+    // Each unplayed dev card has ~20% chance of being a VP card.
+    estimatedVP += devCardCount * 0.2;
+
+    // Pending largest army: if 1 knight away and has a knight in hand, very likely +2 VP
+    const knightsInHand = p.developmentCards.filter((c) => c === "knight").length +
+      p.newDevelopmentCards.filter((c) => c === "knight").length;
+    if (armyHolder !== i) {
+      const knightsNeeded = armyHolder !== null
+        ? armyHolderKnights - p.knightsPlayed + 1
+        : Math.max(0, MIN_KNIGHTS_FOR_LARGEST_ARMY - p.knightsPlayed);
+      if (knightsNeeded <= 1 && knightsInHand >= 1) {
+        estimatedVP += 1.8; // almost guaranteed +2 VP
+      } else if (knightsNeeded <= 2 && knightsInHand >= 1) {
+        estimatedVP += 0.8; // likely
+      }
+    }
+
+    // Pending longest road: if 1-2 roads away
+    if (longestRoadHolder !== i) {
+      const roadsNeeded = longestRoadHolder !== null
+        ? longestRoadLength - roadLen + 1
+        : Math.max(0, MIN_ROADS_FOR_LONGEST_ROAD - roadLen);
+      if (roadsNeeded <= 1) {
+        estimatedVP += 1.5; // very likely soon
+      } else if (roadsNeeded <= 2 && opponentProduction.brick > 0 && opponentProduction.lumber > 0) {
+        estimatedVP += 0.6;
+      }
+    }
+
+    // City potential: if they produce ore+grain and have settlements to upgrade
+    if (hasCityResources && upgradeableSettlements > 0) {
+      const cityRate = Math.min(opponentProduction.ore / 3, opponentProduction.grain / 2);
+      // Each potential city is worth +1 VP; weight by how fast they can build them
+      estimatedVP += Math.min(upgradeableSettlements, 2) * Math.min(1, cityRate * 3);
+    }
+
+    // === MOMENTUM ===
+    // How fast is this player accelerating? High momentum = they'll outpace you even if behind now.
+    let momentum = oppTotalProduction * 0.5; // base: raw production rate
+
+    // City resources (ore+grain) are the best momentum indicator
     if (hasCityResources) {
       const cityCombo = Math.min(opponentProduction.ore, opponentProduction.grain);
-      threatScore += cityCombo * 2;
+      momentum += cityCombo * 1.5;
     }
 
+    // Dev card resources (ore+grain+wool) = army/VP card potential
+    const devCardRate = Math.min(opponentProduction.ore, opponentProduction.grain, opponentProduction.wool);
+    if (devCardRate > 0) {
+      momentum += devCardRate * 0.8;
+    }
+
+    // Settlement resources = expansion potential
+    const settlementRate = Math.min(
+      opponentProduction.brick, opponentProduction.lumber,
+      opponentProduction.grain, opponentProduction.wool
+    );
+    if (settlementRate > 0 && p.settlements.length + p.cities.length < 5) {
+      momentum += settlementRate * 0.6;
+    }
+
+    // Port access amplifies momentum
     if (hasPortAccess) {
       const specificPorts = p.portsAccess.filter((pt) => pt !== "any").length;
-      threatScore += specificPorts * 0.5 + (p.portsAccess.includes("any") ? 0.3 : 0);
+      momentum += specificPorts * 0.3 + (p.portsAccess.includes("any") ? 0.2 : 0);
     }
+
+    // Current hand resources boost momentum — a player sitting on 3 ore + 2 grain
+    // is more immediately dangerous than one who produces them at 0.1/turn
+    const oppHandTotal = Object.values(p.resources).reduce((s, n) => s + n, 0);
+    if (oppHandTotal >= 5) {
+      momentum += 0.3; // large hand = close to building something
+    }
+    // Check if they're close to affording a city or settlement right now
+    const oreInHand = p.resources.ore;
+    const grainInHand = p.resources.grain;
+    if (oreInHand >= 2 && grainInHand >= 1 && upgradeableSettlements > 0) {
+      momentum += 0.5; // close to a city purchase
+    }
+
+    // === THREAT SCORE (used for robber/steal decisions) ===
+    // Combines estimated VP with momentum for a forward-looking assessment
+    let threatScore = estimatedVP + momentum;
+
+    // Near-win urgency: exponentially more dangerous when close to winning
+    const vpAway = vpToWin - estimatedVP;
+    if (vpAway <= 1) threatScore += 5;
+    else if (vpAway <= 2) threatScore += 2;
 
     playerThreats.push({
       playerIndex: i,
       threatScore,
       visibleVP: p.victoryPoints,
+      estimatedVP,
+      momentum,
       devCardCount,
       roadLength: roadLen,
       knightsPlayed: p.knightsPlayed,
@@ -238,6 +328,7 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
       productionRates: opponentProduction,
       hasCityResources,
       hasPortAccess,
+      upgradeableSettlements,
     });
   }
 
@@ -283,6 +374,8 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
 
   // --- Settlement plans (the core of plan-based decision making) ---
   const allPlans = computeSettlementPlans(state, playerIndex, productionRates, tradeRatios);
+  // Plans are recomputed each turn, so if an opponent settled on our target vertex
+  // or blocked our road path, it naturally won't appear in the new plan list.
   const settlementPlan = allPlans.length > 0 ? allPlans[0] : null;
   const alternativePlans = allPlans.slice(1, 4);
 
@@ -305,7 +398,6 @@ export function computeStrategicContext(state: GameState, playerIndex: number): 
     gameProgress,
     vpToWin,
     missingResources,
-    personality,
     weights,
     buildGoal,
     buildGoals,
@@ -354,20 +446,27 @@ function computeEffectiveProduction(
 ): Record<Resource, number> {
   const effective = { ...productionRates };
 
-  // Find our best "conversion" resource: highest production / trade ratio
-  let bestConversionRate = 0;
-  for (const res of ALL_RESOURCES) {
-    const conversionRate = productionRates[res] / tradeRatios[res];
-    if (conversionRate > bestConversionRate) {
-      bestConversionRate = conversionRate;
-    }
-  }
+  // For each resource we don't produce, find the best conversion path.
+  // Conversion: spend `ratio` of sourceRes to get 1 of targetRes.
+  // So the rate of acquiring targetRes = sourceRate / ratio.
+  // But trading diverts production away from the source, so discount.
+  for (const targetRes of ALL_RESOURCES) {
+    if (effective[targetRes] > 0) continue;
 
-  // For resources we don't produce, estimate via conversion
-  for (const res of ALL_RESOURCES) {
-    if (effective[res] === 0) {
-      effective[res] = bestConversionRate * 0.5; // discount since you lose the source resource
+    let bestRate = 0;
+    for (const sourceRes of ALL_RESOURCES) {
+      if (sourceRes === targetRes) continue;
+      const sourceRate = productionRates[sourceRes];
+      if (sourceRate <= 0) continue;
+      const ratio = tradeRatios[sourceRes];
+      // Effective rate: how many targetRes per turn via this source
+      // Discount by 0.3 because: (1) you lose the source resource,
+      // (2) you need to accumulate `ratio` cards before trading,
+      // (3) you might need those source cards for other builds
+      const conversionRate = (sourceRate / ratio) * 0.3;
+      if (conversionRate > bestRate) bestRate = conversionRate;
     }
+    effective[targetRes] = bestRate;
   }
 
   return effective;
@@ -470,9 +569,11 @@ function computeSettlementPlans(
   }
 
   // Rank plans by value / cost, with contested spots boosted
+  // Road cost penalty is softer (0.25 per road) to avoid over-penalizing 1-road plans
+  // that reach much better vertices than adjacent 0-road spots
   plans.sort((a, b) => {
-    const aValue = a.vertexScore / (1 + a.totalMissing * 0.3 + a.roadPath.length * 0.5);
-    const bValue = b.vertexScore / (1 + b.totalMissing * 0.3 + b.roadPath.length * 0.5);
+    const aValue = a.vertexScore / (1 + a.totalMissing * 0.3 + a.roadPath.length * 0.25);
+    const bValue = b.vertexScore / (1 + b.totalMissing * 0.3 + b.roadPath.length * 0.25);
     // Contested spots get a urgency bonus
     const aBonus = a.contested ? aValue * 0.3 : 0;
     const bBonus = b.contested ? bValue * 0.3 : 0;
@@ -600,9 +701,14 @@ function computeCityPlan(
 
   for (const v of player.settlements) {
     const prod = computeVertexProduction(state, v);
-    // Cities double production, so score by how much production we gain
-    if (prod.totalEV > bestScore) {
-      bestScore = prod.totalEV;
+    // Cities double production, so score by how much production we gain.
+    // Weight ore+grain production higher — cities cost 3 ore + 2 grain,
+    // so upgrading a settlement that produces ore/grain is self-reinforcing.
+    let cityScore = prod.totalEV;
+    cityScore += prod.perResource.ore * 1.5;
+    cityScore += prod.perResource.grain * 1.2;
+    if (cityScore > bestScore) {
+      bestScore = cityScore;
       bestVertex = v;
     }
   }

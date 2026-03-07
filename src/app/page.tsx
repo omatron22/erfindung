@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PLAYER_COLOR_HEX } from "@/shared/constants";
 import { PLAYER_COLORS } from "@/shared/types/game";
-import type { GameConfig, PlayerConfig, BuildingStyle, TurnTimer, BotPersonality } from "@/shared/types/config";
-import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS, BOT_PERSONALITIES, DEFAULT_BOT_PERSONALITY } from "@/shared/types/config";
+import type { GameConfig, PlayerConfig, BuildingStyle, TurnTimer } from "@/shared/types/config";
+import { BUILDING_STYLES, DEFAULT_BUILDING_STYLE, TURN_TIMER_OPTIONS, VP_OPTIONS } from "@/shared/types/config";
 import { STYLE_DEFS } from "@/shared/buildingStyles";
-import { StylePreview, RuleCard, PersonalityIcon, PERSONALITY_LABELS } from "@/app/components/ui/LobbyComponents";
+import { StylePreview, RuleCard } from "@/app/components/ui/LobbyComponents";
 import { useSocket } from "@/app/hooks/useSocket";
 import { useMultiplayerStore } from "@/app/stores/multiplayerStore";
 import { playClick, playNavigate, playError as playErrorSound, startMusic } from "@/app/utils/sounds";
@@ -72,8 +72,6 @@ export default function Home() {
     2: BOT_DEFAULTS[1].style,
     3: BOT_DEFAULTS[2].style,
   });
-  const [personalities, setPersonalities] = useState<Record<number, BotPersonality>>({});
-  const [personalityPickerOpen, setPersonalityPickerOpen] = useState<number | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const colorPickerRef = useRef<HTMLDivElement>(null);
 
@@ -221,12 +219,6 @@ export default function Home() {
     setStylePickerOpen(null);
   }
 
-  function pickPersonality(playerIdx: number, personality: BotPersonality) {
-    playClick();
-    setPersonalities((prev) => ({ ...prev, [playerIdx]: personality }));
-    setPersonalityPickerOpen(null);
-  }
-
   function startGame() {
     playNavigate();
     setValidationError(null);
@@ -255,7 +247,6 @@ export default function Home() {
         ...p,
         name: names[i],
         buildingStyle: buildingStyles[i] ?? DEFAULT_BUILDING_STYLE,
-        ...(p.isBot ? { personality: personalities[i] ?? DEFAULT_BOT_PERSONALITY } : {}),
       })),
       fairDice,
       friendlyRobber,
@@ -445,7 +436,7 @@ export default function Home() {
                   <button
                     className="w-6 h-6 border-2 border-black cursor-pointer shrink-0 relative"
                     style={{ backgroundColor: PLAYER_COLOR_HEX[player.color] }}
-                    onClick={() => { setColorPickerOpen(colorPickerOpen === idx ? null : idx); setStylePickerOpen(null); setPersonalityPickerOpen(null); }}
+                    onClick={() => { setColorPickerOpen(colorPickerOpen === idx ? null : idx); setStylePickerOpen(null) }}
                     title={`Color: ${player.color}`}
                   >
                     <span className="absolute inset-0 flex items-center justify-center text-[7px] font-bold"
@@ -478,21 +469,10 @@ export default function Home() {
                     </span>
                   )}
 
-                  {/* Personality (bots only) */}
-                  {player.isBot && (
-                    <button
-                      className={`w-7 h-7 flex items-center justify-center border-2 shrink-0 ${personalityPickerOpen === idx ? "border-amber-500 bg-amber-50" : "border-gray-400 hover:border-gray-600"}`}
-                      onClick={() => { setPersonalityPickerOpen(personalityPickerOpen === idx ? null : idx); setStylePickerOpen(null); setColorPickerOpen(null); }}
-                      title={`Personality: ${PERSONALITY_LABELS[personalities[idx] ?? DEFAULT_BOT_PERSONALITY].name}`}
-                    >
-                      <PersonalityIcon personality={personalities[idx] ?? DEFAULT_BOT_PERSONALITY} size={16} />
-                    </button>
-                  )}
-
                   {/* Building style */}
                   <button
                     className={`w-7 h-7 flex items-center justify-center border-2 shrink-0 ${stylePickerOpen === idx ? "border-amber-500 bg-amber-50" : "border-gray-400 hover:border-gray-600"}`}
-                    onClick={() => { setStylePickerOpen(stylePickerOpen === idx ? null : idx); setColorPickerOpen(null); setPersonalityPickerOpen(null); }}
+                    onClick={() => { setStylePickerOpen(stylePickerOpen === idx ? null : idx); setColorPickerOpen(null) }}
                     title={`Style: ${STYLE_DEFS[buildingStyles[idx] ?? DEFAULT_BUILDING_STYLE].name}`}
                   >
                     <StylePreview
@@ -537,35 +517,6 @@ export default function Home() {
                           >
                             <span className="w-3 h-3 border border-black/30 shrink-0" style={{ backgroundColor: PLAYER_COLOR_HEX[c] }} />
                             <span className="font-pixel text-[5px] text-gray-700 uppercase">{c}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Personality picker dropdown */}
-                {personalityPickerOpen === idx && player.isBot && (
-                  <div className="absolute left-0 z-50 w-52 bg-[#f5edd5] border-2 border-t-0 border-black px-2 py-1.5">
-                    <div className="flex flex-col gap-0.5">
-                      {BOT_PERSONALITIES.map((p) => {
-                        const isCurrent = (personalities[idx] ?? DEFAULT_BOT_PERSONALITY) === p;
-                        const info = PERSONALITY_LABELS[p];
-                        return (
-                          <button
-                            key={p}
-                            className={`flex items-center gap-2 px-2 py-1 border-2 transition-all ${
-                              isCurrent
-                                ? "border-amber-500 bg-amber-50"
-                                : "border-gray-300 hover:border-gray-600 cursor-pointer"
-                            }`}
-                            onClick={() => pickPersonality(idx, p)}
-                          >
-                            <PersonalityIcon personality={p} size={14} />
-                            <div className="flex flex-col items-start">
-                              <span className="font-pixel text-[6px] text-gray-800">{info.name}</span>
-                              <span className="font-pixel text-[5px] text-gray-500">{info.description}</span>
-                            </div>
                           </button>
                         );
                       })}

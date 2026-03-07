@@ -4,16 +4,11 @@ export const BUILDING_STYLES = ["classic", "medieval", "nordic", "colonial", "ea
 export type BuildingStyle = (typeof BUILDING_STYLES)[number];
 export const DEFAULT_BUILDING_STYLE: BuildingStyle = "classic";
 
-export const BOT_PERSONALITIES = ["balanced", "aggressive", "builder", "trader", "devcard"] as const;
-export type BotPersonality = (typeof BOT_PERSONALITIES)[number];
-export const DEFAULT_BOT_PERSONALITY: BotPersonality = "balanced";
-
 export interface PlayerConfig {
   name: string;
   color: string;
   isBot: boolean;
   buildingStyle?: BuildingStyle;
-  personality?: BotPersonality;
 }
 
 export const TURN_TIMER_OPTIONS = [0, 60, 90, 120, 180, 240] as const;

@@ -19,12 +19,12 @@ export interface ClientMessages {
   "game:counter-offer": { offering: Partial<Record<import("./game").Resource, number>>; requesting: Partial<Record<import("./game").Resource, number>> };
   "room:join": { roomCode: string; playerName: string; reconnectToken?: string };
   "room:leave": {};
-  "room:add-bot": { difficulty: "easy" | "medium" | "hard"; personality?: string };
+  "room:add-bot": { difficulty: "easy" | "medium" | "hard" };
   "room:remove-bot": { playerIndex: number };
   "room:start-game": {};
   "room:update-config": { config: Partial<LobbyConfig> };
   "room:update-player": { color?: string; buildingStyle?: string; name?: string };
-  "room:update-bot": { playerIndex: number; name?: string; color?: string; personality?: string };
+  "room:update-bot": { playerIndex: number; name?: string; color?: string };
   "room:leave-game": {};
   "room:request-state": {};
   "chat:message": { text: string };

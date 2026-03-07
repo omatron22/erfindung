@@ -32,10 +32,20 @@ export function pickDevCardToPlay(
     let playProbability = 0.4 * knightEagerness;
 
     if (context) {
-      if (context.distanceToLargestArmy === 0) playProbability = 0.5 * knightEagerness;
-      else if (context.distanceToLargestArmy <= 1) playProbability = Math.min(1.0, 1.0 * knightEagerness);
-      else if (context.distanceToLargestArmy <= 2) playProbability = 0.85 * knightEagerness;
-      else if (context.distanceToLargestArmy <= 3) playProbability = 0.65 * knightEagerness;
+      if (context.distanceToLargestArmy === 0) {
+        // Already have army — play only if threatened or to move robber
+        playProbability = context.largestArmyThreatened ? 0.9 : 0.4;
+      } else if (context.distanceToLargestArmy <= 1) {
+        // 1 knight from army = +2 VP. Always play.
+        playProbability = 1.0;
+      } else if (context.distanceToLargestArmy <= 2) {
+        playProbability = 0.85 * knightEagerness;
+      } else if (context.distanceToLargestArmy <= 3) {
+        playProbability = 0.65 * knightEagerness;
+      }
+
+      // Endgame: always play knights (move robber + army progress)
+      if (context.isEndgame) playProbability = Math.max(playProbability, 0.9);
     }
 
     if (Math.random() < Math.min(1, playProbability)) {
@@ -43,18 +53,26 @@ export function pickDevCardToPlay(
     }
   }
 
-  // Play road building if we have roads to place
+  // Play road building — plan-aware: only when it advances settlement plan or longest road
   if (cards.includes("roadBuilding")) {
-    const canBuildRoads = player.roads.length < 14;
+    // Need room for at least 1 road, and must have a network to extend from
+    const canBuildRoads = player.roads.length < 14 &&
+      (player.settlements.length > 0 || player.cities.length > 0 || player.roads.length > 0);
     if (canBuildRoads) {
-      // Higher priority if close to longest road
+      // High priority if close to longest road
       if (context && context.distanceToLongestRoad <= 2) {
         return { card: "roadBuilding" };
       }
-      // Still play it with lower priority
-      if (!context || context.strategy === "expansion") {
+      // Play if settlement plan needs roads (saves brick+lumber for the settlement itself)
+      if (context?.settlementPlan && context.settlementPlan.roadPath.length >= 1) {
         return { card: "roadBuilding" };
       }
+      // Without context, play if expansion strategy
+      if (!context) {
+        return { card: "roadBuilding" };
+      }
+      // Don't play road building if we have no plan that needs roads —
+      // it's wasteful when saving for cities or dev cards
     }
   }
 
@@ -164,7 +182,14 @@ export function getMostNeededResources(
   }
 
   if (needed.length === 0) {
-    needed.push("ore", "grain");
+    // Only default to ore/grain if we actually need them
+    const player2 = state.players[playerIndex];
+    for (const r of (["ore", "grain", "wool", "brick", "lumber"] as Resource[])) {
+      if (player2.resources[r] === 0) {
+        needed.push(r);
+        if (needed.length >= count) break;
+      }
+    }
   }
 
   return needed.slice(0, count);
@@ -189,10 +214,14 @@ function pickMonopolyResource(state: GameState, playerIndex: number, context?: B
 
     if (totalOpponentCards < minGain) continue;
 
-    // Need multiplier: high if we need this resource for our build goal
+    // Need multiplier: high if we need this resource for our plan/goal
     let needMultiplier = 1;
-    if (context?.buildGoal?.missingResources[res]) {
-      needMultiplier = 3; // Big bonus for resources we need
+    if (context?.settlementPlan?.missingResources[res]) {
+      needMultiplier = 4; // Highest priority — completes our concrete plan
+    } else if (context?.cityPlan?.missingResources[res]) {
+      needMultiplier = 3.5;
+    } else if (context?.buildGoal?.missingResources[res]) {
+      needMultiplier = 3;
     }
 
     const score = totalOpponentCards * needMultiplier;

@@ -5,8 +5,6 @@ import { decideBotAction } from "@/server/bots/botController";
 import { getWeights } from "@/server/bots/personality";
 import type { GameState } from "@/shared/types/game";
 import type { GameConfig } from "@/shared/types/config";
-import type { BotPersonality } from "@/shared/types/config";
-import { BOT_PERSONALITIES } from "@/shared/types/config";
 
 function playThroughSetup(initial: GameState): GameState {
   let state = initial;
@@ -22,25 +20,7 @@ function playThroughSetup(initial: GameState): GameState {
   return state;
 }
 
-function createGameWithPersonality(id: string, names: string[], personality: BotPersonality): GameState {
-  const config: GameConfig = {
-    players: names.map((name, i) => ({
-      name,
-      color: ["red", "blue", "white", "orange", "green", "brown"][i],
-      isBot: true,
-      personality,
-    })),
-    fairDice: false,
-    friendlyRobber: false,
-    doublesRollAgain: false,
-    sheepNuke: false,
-    gameMode: "classic",
-    vpToWin: 10,
-    turnTimer: 0,
-    expansionBoard: false,
-  };
-  return createGame(id, names, config);
-}
+
 
 /**
  * Run a bot game handling bot-initiated trades (offer-trade actions).
@@ -195,28 +175,15 @@ describe("Bot Strategic Context", () => {
   });
 });
 
-describe("Personality System", () => {
-  it("personality weights apply correctly to context", () => {
-    const state = createGameWithPersonality("pers-test", ["Bot1", "Bot2", "Bot3", "Bot4"], "aggressive");
+describe("Strategy Weights", () => {
+  it("optimal weights are applied to context", () => {
+    const state = createGame("weights-test", ["Bot1", "Bot2", "Bot3", "Bot4"]);
     const setup = playThroughSetup(state);
 
     const context = computeStrategicContext(setup, 0);
-    expect(context.personality).toBe("aggressive");
-    expect(context.weights.robberAggression).toBe(1.8);
-    expect(context.weights.knightEagerness).toBe(1.5);
-  });
-
-  it("different personalities produce different weights", () => {
-    const balanced = getWeights("balanced");
-    const aggressive = getWeights("aggressive");
-    const builder = getWeights("builder");
-    const trader = getWeights("trader");
-    const devcard = getWeights("devcard");
-
-    expect(aggressive.robberAggression).toBeGreaterThan(balanced.robberAggression);
-    expect(builder.cityScore).toBeGreaterThan(balanced.cityScore);
-    expect(trader.playerTradeChance).toBeGreaterThan(balanced.playerTradeChance);
-    expect(devcard.devCardScore).toBeGreaterThan(balanced.devCardScore);
+    const weights = getWeights();
+    expect(context.weights.robberAggression).toBe(weights.robberAggression);
+    expect(context.weights.knightEagerness).toBe(weights.knightEagerness);
   });
 
   it("build goal computation works correctly", () => {

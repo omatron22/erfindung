@@ -17,6 +17,8 @@ export interface VertexProduction {
   perResource: Record<Resource, number>;
   diversity: number;
   resourceSet: Set<Resource>;
+  /** Which dice numbers this vertex is on */
+  numbers: Set<number>;
 }
 
 /**
@@ -25,6 +27,7 @@ export interface VertexProduction {
 export function computeVertexProduction(state: GameState, vertex: VertexKey): VertexProduction {
   const perResource: Record<Resource, number> = { brick: 0, lumber: 0, ore: 0, grain: 0, wool: 0 };
   const resourceSet = new Set<Resource>();
+  const numbers = new Set<number>();
   let totalEV = 0;
 
   const adjacentHexes = hexesAdjacentToVertex(vertex);
@@ -40,9 +43,10 @@ export function computeVertexProduction(state: GameState, vertex: VertexKey): Ve
     totalEV += ev;
     perResource[resource] += ev;
     resourceSet.add(resource);
+    numbers.add(hex.number);
   }
 
-  return { totalEV, perResource, diversity: resourceSet.size, resourceSet };
+  return { totalEV, perResource, diversity: resourceSet.size, resourceSet, numbers };
 }
 
 /**
@@ -108,25 +112,37 @@ export function scoreVertex(
   // Diversity bonus (quadratic)
   score += production.diversity * production.diversity * 8;
 
+  // === Resource value weighting ===
+  // Research: "wheat is the most critical resource" and "ore is most valuable"
+  // Cities (3 ore + 2 grain) are the most efficient VP source in Catan.
+  // Brick is scarcer than lumber (3 hexes vs 4) but spent equally → worth slightly more.
+  score += production.perResource.ore * 15;
+  score += production.perResource.grain * 12;
+  score += production.perResource.brick * 6;
+  score += production.perResource.lumber * 4;
+
+  // === Resource pair balance ===
+  // Having brick without lumber (or vice versa) is wasteful — you need both for roads/settlements.
+  // Similarly, ore without grain is less useful for cities.
+  const brickLumberBalance = Math.min(production.perResource.brick, production.perResource.lumber);
+  score += brickLumberBalance * 10; // bonus for having BOTH brick and lumber
+
+  const oreGrainBalance = Math.min(production.perResource.ore, production.perResource.grain);
+  score += oreGrainBalance * 12; // bonus for having BOTH ore and grain (cities)
+
   // Port bonus
   const portBonus = evaluatePortStrategy(state, vertex, production);
   score += portBonus * 80;
+
+  // Penalty for low-production vertices (sub ~8 pips)
+  if (production.totalEV < 0.15) score -= 40;  // terrible spot
+  else if (production.totalEV < 0.25) score -= 15;  // below average
 
   // Penalty for edge-of-board vertices
   const adjacentHexes = hexesAdjacentToVertex(vertex);
   const onBoardHexes = adjacentHexes.filter((h) => state.board.hexes[hexKey(h)]).length;
   if (onBoardHexes < 3) score -= 5;
   if (onBoardHexes < 2) score -= 8;
-
-  // Personality modifiers
-  if (context) {
-    if (context.personality === "builder") {
-      score += (production.perResource.brick + production.perResource.lumber) * 20;
-    }
-    if (context.personality === "devcard") {
-      score += (production.perResource.ore + production.perResource.grain + production.perResource.wool) * 15;
-    }
-  }
 
   return score;
 }
@@ -181,6 +197,21 @@ export function pickSetupVertex(
       const diversityMult = context ? context.weights.setupDiversity : 1.0;
       score += newResources * 35 * diversityMult;
 
+      // === NUMBER DIVERSITY ===
+      // Research: "If your settlements border 5-6 different numbers, you collect resources 2/3 of rolls"
+      // Penalty for duplicating numbers the first settlement already has
+      let newNumbers = 0;
+      let duplicateNumbers = 0;
+      for (const num of production.numbers) {
+        if (firstProduction.numbers.has(num)) {
+          duplicateNumbers++;
+        } else {
+          newNumbers++;
+        }
+      }
+      score += newNumbers * 12;       // reward new number coverage
+      score -= duplicateNumbers * 8;   // penalize overlap
+
       // Critical resource coverage:
       // In Catan, you NEED brick+lumber (for roads/settlements) AND ore+grain (for cities/dev cards)
       // If first settlement covers one pair, second MUST cover the other
@@ -209,12 +240,13 @@ export function pickSetupVertex(
         if (port.type !== "any") {
           const portRes = port.type as Resource;
           // Great if our first settlement produces this resource (we can trade 2:1)
+          // perResource values are ~0.08-0.14 (probability), so scale reasonably
           if (firstProduction.perResource[portRes] > 0) {
-            score += 25 + firstProduction.perResource[portRes] * 100;
+            score += 20 + firstProduction.perResource[portRes] * 40;
           }
           // Also good if THIS vertex produces it
           if (production.perResource[portRes] > 0) {
-            score += 15 + production.perResource[portRes] * 60;
+            score += 12 + production.perResource[portRes] * 30;
           }
         } else {
           // 3:1 any port: universally useful
@@ -224,6 +256,10 @@ export function pickSetupVertex(
 
     } else {
       // === FIRST SETTLEMENT ===
+
+      // Number diversity: more unique numbers = more consistent income
+      const numberDiversityBonus = production.numbers.size * 6;
+      score += numberDiversityBonus;
 
       if (context) {
         const pos = context.turnOrderPosition;
@@ -251,7 +287,7 @@ export function pickSetupVertex(
           score += production.diversity * 10;
         }
 
-        // Port strategy bonus (amplified by personality)
+        // Port strategy bonus
         const portBonus = evaluatePortStrategy(state, vk, production);
         if (portBonus > 0) {
           score += portBonus * 40 * context.weights.portStrategyWeight;

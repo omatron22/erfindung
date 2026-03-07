@@ -5,12 +5,12 @@ import {
   parseHexKey,
   hexKey,
 } from "@/shared/utils/hexMath";
-import { NUMBER_DOTS, TERRAIN_RESOURCE, ALL_RESOURCES } from "@/shared/constants";
+import { NUMBER_DOTS, TERRAIN_RESOURCE, ALL_RESOURCES, BUILDING_COSTS } from "@/shared/constants";
 import type { BotStrategicContext } from "./context";
 
 /**
  * Pick the best hex to place the robber.
- * Uses personality weights for aggression and self-protection.
+ * Uses strategic weights for aggression and self-protection.
  * Endgame: always targets the leader, ignores self-damage.
  */
 export function pickRobberHex(state: GameState, playerIndex: number, context?: BotStrategicContext): HexKey {
@@ -76,12 +76,25 @@ export function pickRobberHex(state: GameState, playerIndex: number, context?: B
             score += dots * buildingMult * 2;
           }
 
-          // Opponent modeling: prefer hexes producing resources the opponent has lots of
+          // Opponent modeling: prefer hexes producing resources the opponent NEEDS
           const resource = TERRAIN_RESOURCE[hex.terrain];
           if (resource) {
             const opponent = state.players[building.playerIndex];
+
+            // Block resources opponents are hoarding (likely saving for a build)
             if (opponent.resources[resource] >= 3) {
               score += opponent.resources[resource] * 0.5;
+            }
+
+            // Theory: "Block ore and wheat to prevent cities/dev cards"
+            // Ore+grain are the most impactful resources to block
+            if (resource === "ore") score += dots * buildingMult * 0.8;
+            else if (resource === "grain") score += dots * buildingMult * 0.6;
+
+            // Infer what opponent is likely building and block those resources
+            const oppBuildNeeds = inferOpponentNeeds(state, building.playerIndex);
+            if (oppBuildNeeds.has(resource)) {
+              score += dots * buildingMult * 1.5; // big bonus for blocking a key resource
             }
           }
         } else {
@@ -135,8 +148,18 @@ export function pickStealTarget(state: GameState, playerIndex: number, context?:
   const vertices = hexVertices(hexCoord);
   const candidates: { player: number; score: number }[] = [];
 
-  // Determine what resources the bot needs for its build goal
+  // Determine what resources the bot needs — plan-aware priority
   const neededResources = new Set<Resource>();
+  if (context?.settlementPlan) {
+    for (const [res, amount] of Object.entries(context.settlementPlan.missingResources)) {
+      if ((amount || 0) > 0) neededResources.add(res as Resource);
+    }
+  }
+  if (context?.cityPlan) {
+    for (const [res, amount] of Object.entries(context.cityPlan.missingResources)) {
+      if ((amount || 0) > 0) neededResources.add(res as Resource);
+    }
+  }
   if (context?.buildGoal) {
     for (const [res, amount] of Object.entries(context.buildGoal.missingResources)) {
       if ((amount || 0) > 0) neededResources.add(res as Resource);
@@ -219,7 +242,7 @@ export function pickStealTarget(state: GameState, playerIndex: number, context?:
 /**
  * Pick which resources to discard when a 7 is rolled.
  * Uses build goal to protect goal resources.
- * Hoarding personality keeps goal resources longer.
+ * Protects plan resources when discarding.
  */
 export function pickDiscardResources(
   state: GameState,
@@ -230,18 +253,21 @@ export function pickDiscardResources(
   const total = Object.values(player.resources).reduce((s, n) => s + n, 0);
   const discardCount = Math.floor(total / 2);
 
-  // Plan-aware resource values: protect resources needed for our plan
+  // Dynamic resource values: resources we produce easily are cheaper to discard,
+  // resources we rarely produce are precious and should be kept.
   const resourceValue: Record<Resource, number> = {
     ore: 3, grain: 3, wool: 2, brick: 2, lumber: 2,
   };
 
   if (context) {
-    // Boost value of resources we DON'T produce (harder to replace)
+    // Production-weighted values: resources we produce a lot are expendable
     for (const res of ALL_RESOURCES) {
       if (context.productionRates[res] === 0) {
-        resourceValue[res] += 2; // hard to replace
+        resourceValue[res] += 3; // can't replace — very precious
       } else if (context.productionRates[res] <= 0.05) {
-        resourceValue[res] += 1; // rare production
+        resourceValue[res] += 2; // rare production
+      } else if (context.productionRates[res] >= 0.2) {
+        resourceValue[res] -= 1; // easy to replace — cheaper to discard
       }
     }
 
@@ -303,4 +329,48 @@ export function pickDiscardResources(
   }
 
   return discard;
+}
+
+/**
+ * Infer what an opponent is likely trying to build based on their resources and board state.
+ * Returns a set of resources they probably need.
+ */
+function inferOpponentNeeds(state: GameState, opponentIndex: number): Set<Resource> {
+  const opp = state.players[opponentIndex];
+  const needs = new Set<Resource>();
+  const hand = opp.resources;
+
+  // Check what builds they're closest to and infer missing resources
+  const builds: Array<{ cost: Partial<Record<Resource, number>>; priority: number }> = [];
+
+  // City: 3 ore + 2 grain
+  if (opp.settlements.length > 0 && opp.cities.length < 4) {
+    builds.push({ cost: BUILDING_COSTS.city, priority: 3 });
+  }
+  // Settlement: brick + lumber + grain + wool
+  if (opp.settlements.length + opp.cities.length < 5) {
+    builds.push({ cost: BUILDING_COSTS.settlement, priority: 2 });
+  }
+  // Dev card: ore + grain + wool
+  if (state.developmentCardDeck.length > 0) {
+    builds.push({ cost: BUILDING_COSTS.developmentCard, priority: 1 });
+  }
+
+  for (const build of builds) {
+    let totalMissing = 0;
+    const missing: Resource[] = [];
+    for (const [res, amount] of Object.entries(build.cost)) {
+      const need = (amount || 0) - hand[res as Resource];
+      if (need > 0) {
+        totalMissing += need;
+        missing.push(res as Resource);
+      }
+    }
+    // If they're close to completing this build (1-2 resources away), these are key resources
+    if (totalMissing <= 2 && totalMissing > 0) {
+      for (const r of missing) needs.add(r);
+    }
+  }
+
+  return needs;
 }

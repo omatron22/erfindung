@@ -31,9 +31,13 @@ export function pickPlayerTrade(
   const player = state.players[playerIndex];
 
   // Don't trade with anyone within 2 VP of winning in endgame
+  // EXCEPTION: If WE are close to winning, we should still trade to complete our build
   if (context.isEndgame) {
-    const anyoneClose = context.playerThreats.some((t) => t.visibleVP >= context.vpToWin - 2);
-    if (anyoneClose) return null;
+    const vpNeeded = context.vpToWin - context.ownVP;
+    const weAreCloseToWinning = vpNeeded <= 2;
+    // Use estimatedVP: someone at 7 visible VP with 2 dev cards is likely at ~8 estimated VP
+    const anyoneClose = context.playerThreats.some((t) => t.estimatedVP >= context.vpToWin - 2);
+    if (anyoneClose && !weAreCloseToWinning) return null;
   }
 
   // Determine what we need — from plan first, then build goal
@@ -165,7 +169,8 @@ export function pickPlayerTrade(
 
   // Opponent benefit cap: don't feed the leader
   if (maxOffer > 1) {
-    const maxOpponentVP = Math.max(...context.playerThreats.map((t) => t.visibleVP));
+    // Use estimatedVP for leader detection — visible VP is misleading
+    const maxOpponentVP = Math.max(...context.playerThreats.map((t) => t.estimatedVP));
     const vpLead = maxOpponentVP - context.ownVP;
 
     if (vpLead >= 3) {
@@ -336,16 +341,3 @@ function getBuildGoals(state: GameState, playerIndex: number, context?: BotStrat
   return goals;
 }
 
-/**
- * Should bot reject a trade that helps the proposer?
- */
-export function shouldRejectLeaderTrade(
-  state: GameState,
-  fromPlayer: number,
-  context: BotStrategicContext
-): boolean {
-  const fromVP = state.players[fromPlayer].victoryPoints;
-  const botVP = state.players[context.playerIndex].victoryPoints;
-  if (fromVP >= botVP + 2) return true;
-  return false;
-}

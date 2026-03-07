@@ -2,51 +2,6 @@ import { describe, it, expect } from "vitest";
 import { createGame, applyAction } from "@/server/engine/gameEngine";
 import { decideBotAction } from "@/server/bots/botController";
 import type { GameState } from "@/shared/types/game";
-import type { GameConfig } from "@/shared/types/config";
-import type { BotPersonality } from "@/shared/types/config";
-import { BOT_PERSONALITIES } from "@/shared/types/config";
-
-function createGameWithPersonality(id: string, names: string[], personality: BotPersonality): GameState {
-  const config: GameConfig = {
-    players: names.map((name, i) => ({
-      name,
-      color: ["red", "blue", "white", "orange"][i],
-      isBot: true,
-      personality,
-    })),
-    fairDice: false,
-    friendlyRobber: false,
-    doublesRollAgain: false,
-    sheepNuke: false,
-    gameMode: "classic",
-    vpToWin: 10,
-    turnTimer: 0,
-    expansionBoard: false,
-  };
-  return createGame(id, names, config);
-}
-
-function createMixedPersonalityGame(id: string): GameState {
-  const personalities: BotPersonality[] = ["balanced", "aggressive", "builder", "trader"];
-  const names = ["Balanced", "Aggro", "Builder", "Trader"];
-  const config: GameConfig = {
-    players: names.map((name, i) => ({
-      name,
-      color: ["red", "blue", "white", "orange"][i],
-      isBot: true,
-      personality: personalities[i],
-    })),
-    fairDice: false,
-    friendlyRobber: false,
-    doublesRollAgain: false,
-    sheepNuke: false,
-    gameMode: "classic",
-    vpToWin: 10,
-    turnTimer: 0,
-    expansionBoard: false,
-  };
-  return createGame(id, names, config);
-}
 
 /**
  * Run a complete bot-only game.
@@ -196,41 +151,15 @@ describe("Bot Game Simulation", () => {
     }
     console.log(`10 games average: ${Math.round(totalTurns / 10)} turns`);
   });
-});
 
-describe("Personality Bot Games", () => {
-  for (const personality of BOT_PERSONALITIES) {
-    it(`completes a 4-player ${personality} game`, () => {
-      const initial = createGameWithPersonality(
-        `${personality}-test`,
-        ["Bot1", "Bot2", "Bot3", "Bot4"],
-        personality,
-      );
-      const { state, turns, finished, tradeCount } = runBotGame(initial);
-      expect(finished).toBe(true);
-      expect(state.winner).not.toBeNull();
-      console.log(`${personality} game: ${turns} turns, ${tradeCount} trades, winner: ${state.players[state.winner!].name}`);
-    });
-  }
-
-  it("completes a mixed-personality game", () => {
-    const initial = createMixedPersonalityGame("mixed-test");
-    const { state, turns, finished, tradeCount } = runBotGame(initial);
-    expect(finished).toBe(true);
-    expect(state.winner).not.toBeNull();
-    console.log(`Mixed game: ${turns} turns, ${tradeCount} trades, winner: ${state.players[state.winner!].name}`);
-  });
-
-  it("trader personality initiates trades during games", () => {
-    // Run 3 trader games and check that at least one has trades
+  it("bots initiate trades during games", () => {
     let totalTrades = 0;
     for (let i = 0; i < 3; i++) {
-      const initial = createGameWithPersonality(`trader-trade-${i}`, ["Bot1", "Bot2", "Bot3", "Bot4"], "trader");
+      const initial = createGame(`trade-test-${i}`, ["Bot1", "Bot2", "Bot3", "Bot4"]);
       const { tradeCount } = runBotGame(initial);
       totalTrades += tradeCount;
     }
-    // Trader personality has 0.8 trade chance — over 3 games it should trade at least once
     expect(totalTrades).toBeGreaterThan(0);
-    console.log(`Trader games: ${totalTrades} total trades across 3 games`);
+    console.log(`Trade games: ${totalTrades} total trades across 3 games`);
   });
 });

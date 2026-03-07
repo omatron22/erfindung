@@ -7,6 +7,7 @@ import { pickRobberHex, pickStealTarget, pickDiscardResources } from "./strategy
 import { pickDevCardToPlay } from "./strategy/devCards";
 import { computeStrategicContext, type BotStrategicContext } from "./strategy/context";
 import { BUILDING_COSTS, ALL_RESOURCES } from "@/shared/constants";
+import { calculateLongestRoad } from "@/server/engine/longestRoad";
 import {
   edgesAtVertex,
   edgeEndpoints,
@@ -43,6 +44,7 @@ export function decideBotAction(state: GameState, botIndex: number): GameAction 
   if (state.phase !== "main") return null;
 
   const context = computeStrategicContext(state, botIndex);
+  pruneTradeMemory(state.turnNumber);
 
   switch (state.turnPhase) {
     case "roll":
@@ -60,6 +62,8 @@ export function decideBotAction(state: GameState, botIndex: number): GameAction 
       return makeSheepNukePickAction(state, botIndex, context);
     case "monopoly":
     case "year-of-plenty":
+      // These turn phases are defined in the type but never set by the engine.
+      // Monopoly and Year of Plenty resolve immediately during trade-or-build/roll.
       return null;
     default:
       return null;
@@ -98,12 +102,34 @@ function makeRollOrPlayDevCard(state: GameState, botIndex: number, context: BotS
     if (context.distanceToLargestArmy <= 1) playProb = Math.min(1, 0.8 * context.weights.knightEagerness);
     else if (context.distanceToLargestArmy <= 2) playProb = Math.min(1, 0.6 * context.weights.knightEagerness);
 
+    // Extra incentive: if the robber is on one of OUR hexes, play knight to move it away
+    const robberOnOurHex = isRobberOnOurHex(state, botIndex);
+    if (robberOnOurHex) playProb = Math.max(playProb, 0.85);
+
+    // Win check: if playing knight gives us largest army and wins the game
+    const vpNeeded = context.vpToWin - context.ownVP;
+    if (vpNeeded <= 2 && context.distanceToLargestArmy === 1) {
+      playProb = 1.0; // guaranteed win path
+    }
+
     if (Math.random() < playProb) {
       return { type: "play-knight", playerIndex: botIndex };
     }
   }
 
   return { type: "roll-dice", playerIndex: botIndex };
+}
+
+/** Check if the robber is on a hex adjacent to any of our settlements/cities */
+function isRobberOnOurHex(state: GameState, botIndex: number): boolean {
+  const robberHex = state.board.robberHex;
+  const hex = state.board.hexes[robberHex];
+  if (!hex) return false;
+  const verts = hexVertices(hex.coord);
+  return verts.some((vk) => {
+    const b = state.board.vertices[vk];
+    return b !== null && b !== undefined && b.playerIndex === botIndex;
+  });
 }
 
 // ============================================================
@@ -159,6 +185,11 @@ function makePlanDrivenAction(state: GameState, botIndex: number, context: BotSt
   if (state.freeNukeAvailable && state.config?.sheepNuke) {
     return { type: "sheep-nuke", playerIndex: botIndex };
   }
+
+  // === WIN-THIS-TURN DETECTION ===
+  // Research: "Work backwards from winning." Check if we can win RIGHT NOW.
+  const winAction = checkWinningMove(state, botIndex, context);
+  if (winAction) return winAction;
 
   // 1. Consider playing a dev card
   if (!player.hasPlayedDevCardThisTurn) {
@@ -223,26 +254,32 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
   const player = state.players[botIndex];
   const actions: ScoredAction[] = [];
   const plan = context.settlementPlan;
+  const totalHand = Object.values(player.resources).reduce((s, n) => s + n, 0);
 
-  // --- SETTLEMENT (always highest priority — 1 VP + production) ---
+  // 7-card management: if we have 7+ cards, we're at risk of losing half on a 7.
+  // Boost all affordable actions to encourage spending rather than hoarding.
+  const robberRiskBonus = totalHand >= 7 ? Math.min(50, (totalHand - 6) * 12) : 0;
+
+  // --- SETTLEMENT (1 VP + new production — highest value per action) ---
   if (canAfford(player, BUILDING_COSTS.settlement)) {
     // Check if the plan's target vertex is directly reachable (0 roads needed)
     if (plan && plan.roadPath.length === 0) {
       const prod = computeVertexProduction(state, plan.targetVertex);
-      let score = 200 + prod.totalEV * 100; // Very high — this IS the plan
-      if (plan.contested) score += 50; // Rush!
+      let score = 200 + prod.totalEV * 100;
+      if (plan.contested) score += 50;
+      score += robberRiskBonus;
       actions.push({
         name: "settlement-plan",
         score,
         execute: () => ({ type: "build-settlement", playerIndex: botIndex, vertex: plan.targetVertex }),
       });
     }
-    // Also check any reachable vertex (in case plan vertex isn't the best available right now)
     const vertex = pickBuildVertex(state, botIndex);
     if (vertex && (!plan || vertex !== plan.targetVertex)) {
       const prod = computeVertexProduction(state, vertex);
       let score = 180 + prod.totalEV * 90;
       if (context.isEndgame) score += 40;
+      score += robberRiskBonus;
       actions.push({
         name: "settlement-opportunistic",
         score,
@@ -251,12 +288,25 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
     }
   }
 
-  // --- CITY (high VP value: 1 VP + doubled production) ---
+  // --- CITY (1 VP + doubled production — always worth it when affordable) ---
+  // Key insight: cities are "free VP" when you have the resources. A city ALWAYS
+  // beats a road because it's immediate VP. Only a reachable settlement competes.
+  // Theory: "Secure 3 settlements first, then focus on cities" — but don't skip
+  // a city if we have the resources and no settlement is reachable.
   if (canAfford(player, BUILDING_COSTS.city) && context.cityPlan) {
     const cp = context.cityPlan;
-    let score = 170 + cp.score * 80; // High base — cities are efficient VP
-    if (context.strategy === "cities") score += 30;
-    if (context.isEndgame) score += 40;
+    let score = 190 + cp.score * 90;
+    if (context.strategy === "cities") score += 20;
+    if (context.isEndgame) score += 50;
+    // If we don't have a settlement plan (or it needs roads), city is even better
+    if (!plan || plan.roadPath.length > 0) score += 20;
+    // Early game: prefer getting to 3 settlements before cities (diversify production)
+    // But only if a settlement is immediately reachable (0 roads needed, affordable)
+    const totalBuildings = player.settlements.length + player.cities.length;
+    if (totalBuildings < 3 && plan && plan.roadPath.length === 0 && canAfford(player, BUILDING_COSTS.settlement)) {
+      score -= 25; // prefer the reachable settlement, but don't hard-block the city
+    }
+    score += robberRiskBonus;
     actions.push({
       name: "city",
       score,
@@ -264,40 +314,25 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
     });
   }
 
-  // --- ROAD (ONLY if it's on the plan path) ---
+  // --- ROAD (ONLY if it's on the plan path or for longest road) ---
   if (canAfford(player, BUILDING_COSTS.road) && player.roads.length < 15) {
     if (plan && plan.roadPath.length > 0) {
-      // Build the FIRST road on the planned path
       const nextRoad = plan.roadPath[0];
-      // Verify the road is still available
       if (state.board.edges[nextRoad] === null) {
-        let score = 80; // Base: roads themselves aren't VP
-
-        // Boost if the plan target is high-value
+        let score = 80;
         score += plan.vertexScore * 0.3;
-
-        // Boost if contested (race to settle)
         if (plan.contested) score += 40;
+        if (plan.roadPath.length === 1) score += 30; // last road before settle
 
-        // Boost if this is the LAST road before settlement placement
-        if (plan.roadPath.length === 1) score += 30;
-
-        // If we can't afford settlement anyway, slight penalty (save resources?)
-        // But if the road is on the path, it's still progress
-        const canAffordSettlement = canAfford(player, {
-          brick: 1 + plan.roadPath.length,
-          lumber: 1 + plan.roadPath.length,
-          grain: 1,
-          wool: 1,
-        });
-        if (!canAffordSettlement && plan.roadPath.length > 1) {
-          // We need more roads AND can't afford everything — build the road if
-          // we can at least save for next turn, but penalize if we're wasting
-          score -= 10;
+        // If we can't afford the full plan, roads are still progress
+        // but not if we'd be better off saving
+        if (plan.roadPath.length > 2 && plan.totalMissing > 4) {
+          score -= 15; // long plan with many missing resources — save up
         }
 
-        // IMPORTANT: don't build roads if we could build something with VP instead
-        // Settlement/city will outscore this since they start at 170-200
+        // 7-card risk: better to spend on a plan road than lose cards
+        score += robberRiskBonus * 0.5; // half bonus (roads aren't VP)
+
         actions.push({
           name: "road-plan",
           score,
@@ -306,15 +341,25 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
       }
     }
 
-    // Longest road pursuit: build a road even off-plan if it gives us longest road
-    if (context.distanceToLongestRoad <= 2 && player.longestRoadLength >= 3) {
+    // Longest road pursuit — boosted when VP path includes longest road
+    if (context.distanceToLongestRoad <= 3 && player.longestRoadLength >= 3) {
       const edge = pickBuildRoad(state, botIndex, context);
       if (edge) {
         const isOnPlan = plan?.roadPath.includes(edge);
         if (!isOnPlan) {
           let score = 60;
-          if (context.distanceToLongestRoad <= 1) score = 110; // +2 VP is huge
-          if (context.longestRoadThreatened) score += 30;
+          if (context.distanceToLongestRoad === 0) {
+            // We HOLD longest road — defend it if threatened
+            score = context.longestRoadThreatened ? 150 : 30;
+          } else if (context.distanceToLongestRoad <= 1) {
+            score = 130; // +2 VP is huge
+          } else if (context.distanceToLongestRoad <= 2) {
+            score = 85;
+          }
+          if (context.longestRoadThreatened) score += 40;
+          // VP path integration: if our win plan includes longest road, boost further
+          if (context.vpPaths.longestRoad > 0) score += 20;
+          score += robberRiskBonus * 0.5;
           actions.push({
             name: "road-longest",
             score,
@@ -325,28 +370,55 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
     }
   }
 
-  // --- DEV CARD (VP + army + utility) ---
+  // --- DEV CARD (speculative VP + army progress) ---
   if (canAfford(player, BUILDING_COSTS.developmentCard) && state.developmentCardDeck.length > 0) {
-    let score = 50; // Base: dev cards are speculative
+    let score = 55;
 
-    // Army pursuit: dev cards contain knights
-    if (context.distanceToLargestArmy <= 2 && player.knightsPlayed >= 2) score += 40;
-    if (context.distanceToLargestArmy <= 1) score += 60;
-    if (context.largestArmyThreatened) score += 30;
+    // === "City before dev cards" rule ===
+    // Research: "Build at least one city before buying dev cards" for the production boost.
+    // Cities double your income, making future dev cards easier to buy.
+    if (player.cities.length === 0 && player.settlements.length > 0) {
+      score -= 30; // strongly prefer getting first city before dev card spree
+    }
 
-    // Strategy bonus
-    if (context.strategy === "development") score += 25;
+    // Army pursuit: dev deck is ~56% knights. If 1 knight from army = +2 VP,
+    // expected value of buying = 0.56 * 2 VP = 1.12 VP. That's huge.
+    const knightsInHand = player.developmentCards.filter(c => c === "knight").length;
+    const totalKnightsNeeded = context.distanceToLargestArmy;
 
-    // Endgame: dev cards might contain VP cards
+    if (totalKnightsNeeded <= 1 && knightsInHand === 0) {
+      // 1 knight away but don't have one — buying is worth ~1.1 VP
+      score += 80;
+    } else if (totalKnightsNeeded <= 1 && knightsInHand >= 1) {
+      // Already have a knight to play — buying another is less urgent
+      score += 20;
+    } else if (totalKnightsNeeded <= 2) {
+      score += 50;
+    } else if (totalKnightsNeeded <= 3) {
+      score += 25;
+    }
+
+    if (context.largestArmyThreatened) score += 35;
+    if (context.strategy === "development") score += 20;
+
+    // === VP path integration ===
+    // If our best path to victory involves largest army, boost dev card value
+    if (context.vpPaths.largestArmy > 0 && totalKnightsNeeded <= 3) {
+      score += 25; // army is part of our win plan
+    }
+
+    // Endgame: VP cards in deck
     if (context.isEndgame) {
-      const vpCardsRemaining = state.developmentCardDeck.length; // we don't know contents, but odds improve
-      score += Math.min(30, vpCardsRemaining * 2);
+      score += Math.min(35, state.developmentCardDeck.length * 3);
     }
 
-    // DON'T buy dev cards if we're saving for a settlement and close
-    if (plan && plan.totalMissing <= 2) {
-      score -= 40; // strongly prefer completing the plan
+    // Don't buy if we're 1-2 resources from completing the plan
+    if (plan && plan.totalMissing <= 2 && plan.roadPath.length === 0) {
+      score -= 50; // strongly prefer the guaranteed settlement
     }
+
+    // 7-card risk: dev card costs 3 resources, helps reduce hand
+    score += robberRiskBonus * 0.7;
 
     actions.push({
       name: "devCard",
@@ -372,7 +444,8 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
 
 function evaluateNukeDesirability(state: GameState, botIndex: number, context: BotStrategicContext): number {
   const leader = context.playerThreats[0];
-  const leaderVP = leader?.visibleVP ?? 0;
+  // Use estimatedVP to detect the true leader, not just visible points
+  const leaderVP = leader?.estimatedVP ?? 0;
   const vpBehind = leaderVP - context.ownVP;
   const leaderCloseToWin = leaderVP >= context.vpToWin - 2;
   const botFarBehind = vpBehind >= 3;
@@ -578,6 +651,95 @@ function makeSheepNukePickAction(state: GameState, botIndex: number, context: Bo
 // Helpers
 // ============================================================
 
+/**
+ * Check if the bot can win the game THIS TURN.
+ * Research: "Always think about what wins the game. Work from back to front."
+ *
+ * Checks (in order of priority):
+ * 1. Building a settlement or city that reaches VP target
+ * 2. Buying a dev card when we have hidden VP cards that push us over
+ * 3. Playing a knight that gives us largest army for the win
+ */
+function checkWinningMove(state: GameState, botIndex: number, context: BotStrategicContext): GameAction | null {
+  const player = state.players[botIndex];
+  const vpNeeded = context.vpToWin - context.ownVP;
+
+  if (vpNeeded <= 0) return null; // already won (shouldn't happen)
+
+  // --- Can we win by building a city? (1 VP) ---
+  if (vpNeeded === 1 && canAfford(player, BUILDING_COSTS.city) && context.cityPlan) {
+    return { type: "build-city", playerIndex: botIndex, vertex: context.cityPlan.vertex };
+  }
+
+  // --- Can we win by building a settlement? (1 VP) ---
+  if (vpNeeded === 1 && canAfford(player, BUILDING_COSTS.settlement)) {
+    const plan = context.settlementPlan;
+    if (plan && plan.roadPath.length === 0) {
+      return { type: "build-settlement", playerIndex: botIndex, vertex: plan.targetVertex };
+    }
+    const vertex = pickBuildVertex(state, botIndex);
+    if (vertex) {
+      return { type: "build-settlement", playerIndex: botIndex, vertex };
+    }
+  }
+
+  // --- Can we win by playing a knight for largest army? (2 VP) ---
+  if (vpNeeded <= 2 && !player.hasPlayedDevCardThisTurn && player.developmentCards.includes("knight")) {
+    if (context.distanceToLargestArmy === 1) {
+      // Playing this knight gives us largest army = +2 VP
+      return { type: "play-knight", playerIndex: botIndex };
+    }
+  }
+
+  // Dev card VP gamble is handled by evaluateActions with proper scoring.
+  // Don't override here — checkWinningMove should only return GUARANTEED wins.
+
+  // --- Can we win with settlement + city combo? (2 VP) ---
+  if (vpNeeded === 2 && canAfford(player, BUILDING_COSTS.settlement) && canAfford(player, BUILDING_COSTS.city)) {
+    // Check if we have enough resources for BOTH (not double-counted)
+    const combinedCost: Partial<Record<Resource, number>> = {};
+    for (const [r, a] of Object.entries(BUILDING_COSTS.settlement)) {
+      combinedCost[r as Resource] = (combinedCost[r as Resource] || 0) + (a || 0);
+    }
+    for (const [r, a] of Object.entries(BUILDING_COSTS.city)) {
+      combinedCost[r as Resource] = (combinedCost[r as Resource] || 0) + (a || 0);
+    }
+    if (canAfford(player, combinedCost)) {
+      // Build settlement first (city needs an existing settlement)
+      const plan = context.settlementPlan;
+      if (plan && plan.roadPath.length === 0) {
+        return { type: "build-settlement", playerIndex: botIndex, vertex: plan.targetVertex };
+      }
+      const vertex = pickBuildVertex(state, botIndex);
+      if (vertex) {
+        return { type: "build-settlement", playerIndex: botIndex, vertex };
+      }
+    }
+  }
+
+  // --- Can we win by building road for longest road? (2 VP) ---
+  if (vpNeeded <= 2 && context.distanceToLongestRoad === 1 && canAfford(player, BUILDING_COSTS.road)) {
+    const edge = pickBuildRoad(state, botIndex, context);
+    if (edge) {
+      // Simulate: would this road give us longest road?
+      const simPlayers = state.players.map((p, i) =>
+        i === botIndex ? { ...p, roads: [...p.roads, edge] } : p
+      );
+      const simEdges = { ...state.board.edges, [edge]: { playerIndex: botIndex } };
+      const simState = { ...state, players: simPlayers, board: { ...state.board, edges: simEdges } } as GameState;
+      const newLength = calculateLongestRoad(simState, botIndex);
+      const currentHolder = state.longestRoadHolder;
+      const currentBest = currentHolder !== null ? calculateLongestRoad(state, currentHolder) : 0;
+
+      if (newLength >= 5 && (currentHolder === null || newLength > currentBest || currentHolder === botIndex)) {
+        return { type: "build-road", playerIndex: botIndex, edge };
+      }
+    }
+  }
+
+  return null;
+}
+
 function canAfford(
   player: { resources: Record<Resource, number> },
   cost: Partial<Record<Resource, number>>
@@ -608,6 +770,21 @@ const counterOfferMemory = new Map<string, {
   turn: number;
   result: { offering: Partial<Record<Resource, number>>; requesting: Partial<Record<Resource, number>> } | null;
 }>();
+
+/** Prune old entries from trade memory maps to prevent unbounded growth */
+function pruneTradeMemory(currentTurn: number): void {
+  // Only prune every 10 turns to avoid overhead
+  if (currentTurn % 10 !== 0) return;
+  for (const [key, mem] of tradeMemory) {
+    if (currentTurn - mem.turn > 10) tradeMemory.delete(key);
+  }
+  for (const [key, mem] of proposedTradeMemory) {
+    if (currentTurn - mem.turn > 10) proposedTradeMemory.delete(key);
+  }
+  for (const [key, mem] of counterOfferMemory) {
+    if (currentTurn - mem.turn > 10) counterOfferMemory.delete(key);
+  }
+}
 
 function getTradeHash(offering: Partial<Record<Resource, number>>, requesting: Partial<Record<Resource, number>>): string {
   const o = ALL_RESOURCES.map((r) => offering[r] ?? 0).join(",");
@@ -656,8 +833,10 @@ export function generateBotCounterOffer(
       const context = computeStrategicContext(state, botIndex);
       counterChance = context.weights.counterOfferChance;
 
-      const fromVP = state.players[trade!.fromPlayer].victoryPoints;
-      if (fromVP >= context.vpToWin - 1) return null;
+      // Use estimatedVP — catch players with hidden VP cards near winning
+      const fromThreat = context.playerThreats.find((t) => t.playerIndex === trade!.fromPlayer);
+      const fromEstVP = fromThreat?.estimatedVP ?? state.players[trade!.fromPlayer].victoryPoints;
+      if (fromEstVP >= context.vpToWin - 1) return null;
 
       if (Math.random() > counterChance) return null;
 
@@ -804,8 +983,8 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     }
   }
 
-  // Check memory
-  const memKey = `${botIndex}`;
+  // Check memory (keyed by bot+opponent pair so memory is per-relationship)
+  const memKey = `${botIndex}-${trade.fromPlayer}`;
   const tradeHash = getTradeHash(trade.offering, trade.requesting);
   const mem = tradeMemory.get(memKey);
   if (mem && mem.tradeHash === tradeHash && state.turnNumber - mem.turn < 5) {
@@ -820,9 +999,19 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
   }
 
   // Hard reject: never trade with someone about to win
+  // Use estimatedVP to catch players with hidden VP cards
   if (context) {
-    const fromVP = state.players[trade.fromPlayer].victoryPoints;
-    if (fromVP >= context.vpToWin - 1) {
+    const fromThreat = context.playerThreats.find((t) => t.playerIndex === trade.fromPlayer);
+    const fromEstimatedVP = fromThreat?.estimatedVP ?? state.players[trade.fromPlayer].victoryPoints;
+    if (fromEstimatedVP >= context.vpToWin - 1) {
+      tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
+      return "reject";
+    }
+
+    // Also reject if the LEADER is 1 VP from winning (don't help them)
+    // But still allow trades with non-leaders to avoid completely freezing the game
+    const leaderThreat = context.playerThreats[0];
+    if (leaderThreat && leaderThreat.playerIndex === trade.fromPlayer && leaderThreat.estimatedVP >= context.vpToWin - 1) {
       tradeMemory.set(memKey, { tradeHash, turn: state.turnNumber, decision: "reject" });
       return "reject";
     }
@@ -881,12 +1070,28 @@ export function decideBotTradeResponse(state: GameState, botIndex: number): "acc
     }
   }
 
-  // VP penalty for trading with leaders
+  // VP penalty for trading with leaders — use estimatedVP for true leader detection
   if (context) {
-    const fromVP = state.players[trade.fromPlayer].victoryPoints;
+    const fromThreat = context.playerThreats.find((t) => t.playerIndex === trade.fromPlayer);
+    const fromVP = fromThreat?.estimatedVP ?? state.players[trade.fromPlayer].victoryPoints;
     const botVP = context.ownVP;
     if (fromVP >= botVP + 2) score -= 2;
     else if (fromVP >= botVP + 1) score -= 0.5;
+
+    // Momentum penalty: don't help players accelerating faster than us
+    if (fromThreat && fromThreat.momentum > 1.5) {
+      score -= fromThreat.momentum * 0.3;
+    }
+
+    // === Trade timing awareness ===
+    // Research: "Trading on your turn benefits you more — you can use resources immediately."
+    // When it's the opponent's turn, they benefit more from the trade. Be pickier.
+    if (state.currentPlayerIndex === trade.fromPlayer) {
+      // It's their turn — they'll use these resources right away
+      score -= 0.5;
+      // Extra cautious in endgame: opponent might win with these resources
+      if (context.isEndgame) score -= 1.5;
+    }
   }
 
   const threshold = context?.weights.tradeAcceptThreshold ?? 0;
