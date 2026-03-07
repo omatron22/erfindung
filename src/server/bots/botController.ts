@@ -333,6 +333,10 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
         // 7-card risk: better to spend on a plan road than lose cards
         score += robberRiskBonus * 0.5; // half bonus (roads aren't VP)
 
+        // Penalize if we already have many roads — settlements/cities are better
+        if (player.roads.length >= 10) score -= 15;
+        if (player.roads.length >= 12) score -= 20;
+
         actions.push({
           name: "road-plan",
           score,
@@ -341,30 +345,41 @@ function evaluateActions(state: GameState, botIndex: number, context: BotStrateg
       }
     }
 
-    // Longest road pursuit — boosted when VP path includes longest road
-    if (context.distanceToLongestRoad <= 3 && player.longestRoadLength >= 3) {
+    // Longest road pursuit — only when close or defending
+    // Tighten conditions: must be within 2 roads (not 3), and need either
+    // a settlement plan or be very close to claiming/defending the award
+    const shouldPursueLongestRoad =
+      context.distanceToLongestRoad === 0 ? context.longestRoadThreatened : // defend only if threatened
+      context.distanceToLongestRoad <= 1 ? true : // 1 road away = +2 VP, always worth it
+      context.distanceToLongestRoad <= 2 && player.longestRoadLength >= 4 && context.vpPaths.longestRoad > 0; // 2 away only if it's part of VP plan
+
+    if (shouldPursueLongestRoad && player.roads.length < 13) {
       const edge = pickBuildRoad(state, botIndex, context);
       if (edge) {
         const isOnPlan = plan?.roadPath.includes(edge);
         if (!isOnPlan) {
-          let score = 60;
+          let score = 0;
           if (context.distanceToLongestRoad === 0) {
-            // We HOLD longest road — defend it if threatened
-            score = context.longestRoadThreatened ? 150 : 30;
+            score = context.longestRoadThreatened ? 140 : 0; // only defend if threatened
           } else if (context.distanceToLongestRoad <= 1) {
             score = 130; // +2 VP is huge
           } else if (context.distanceToLongestRoad <= 2) {
-            score = 85;
+            score = 75;
           }
           if (context.longestRoadThreatened) score += 40;
-          // VP path integration: if our win plan includes longest road, boost further
           if (context.vpPaths.longestRoad > 0) score += 20;
           score += robberRiskBonus * 0.5;
-          actions.push({
-            name: "road-longest",
-            score,
-            execute: () => ({ type: "build-road", playerIndex: botIndex, edge }),
-          });
+
+          // Penalize if we already have many roads (diminishing returns)
+          if (player.roads.length >= 10) score -= 20;
+
+          if (score > 0) {
+            actions.push({
+              name: "road-longest",
+              score,
+              execute: () => ({ type: "build-road", playerIndex: botIndex, edge }),
+            });
+          }
         }
       }
     }

@@ -210,15 +210,14 @@ export function pickBuildRoad(state: GameState, playerIndex: number, context?: B
       }
     }
 
-    score += 2; // base tiebreaker
-
     if (score > bestScore) {
       bestScore = score;
       bestEdge = ek;
     }
   }
 
-  return bestEdge;
+  // Only return a road if it actually scores positive (has some purpose)
+  return bestScore > 0 ? bestEdge : null;
 }
 
 function simulateRoad(state: GameState, playerIndex: number, edge: EdgeKey): GameState {
